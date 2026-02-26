@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SISTEMA DE CITAS MÉDICAS v2.0
+SISTEMA DE CITAS MÉDICAS v3.0
 Aplicación web Flask con SQLite para gestión de citas.
 Templates embebidos para evitar problemas de despliegue.
 """
@@ -50,6 +50,7 @@ SPECIALTY_MAP = {
 
 DIAS_ES = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO']
 DIAS_CORTO = ['LUN', 'MAR', 'MIÉ', 'JUE', 'VIE', 'SÁB', 'DOM']
+MESES_ES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 
 # ==============================================================================
 # CSS EMBEBIDO
@@ -135,7 +136,7 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .progress-bar{width:100%;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;margin-bottom:.2rem}
 .progress-fill{height:100%;background:var(--accent);border-radius:3px;transition:width .3s}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:200;padding:1rem}
-.modal-content{background:#fff;border-radius:var(--radius);box-shadow:0 4px 12px rgba(0,0,0,.1);width:100%;max-width:480px;max-height:90vh;overflow-y:auto}
+.modal-content{background:#fff;border-radius:var(--radius);box-shadow:0 4px 12px rgba(0,0,0,.1);width:100%;max-width:520px;max-height:90vh;overflow-y:auto}
 .modal-header{display:flex;justify-content:space-between;align-items:center;padding:1rem 1.25rem;border-bottom:1px solid var(--border)}
 .modal-header h3{margin:0;font-size:1.05rem}
 .modal-close{width:32px;height:32px;border:none;background:#f1f5f9;border-radius:50%;font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center}
@@ -161,37 +162,37 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .empty-state{text-align:center;padding:3rem 1rem;color:var(--text-muted)}
 .empty-icon{font-size:3rem;margin-bottom:.5rem}
 .empty-state h3{color:var(--text);margin-bottom:.5rem}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-top:.5rem}
+.cal-header{background:var(--primary);color:#fff;padding:.3rem;text-align:center;font-size:.7rem;font-weight:700}
+.cal-day{padding:.3rem;text-align:center;font-size:.75rem;border:1px solid var(--border);min-height:32px;cursor:pointer;border-radius:3px;transition:all .15s}
+.cal-day:hover{transform:scale(1.05);box-shadow:var(--shadow)}
+.cal-day.empty{border:none;cursor:default}
+.cal-day.empty:hover{transform:none;box-shadow:none}
+.cal-day.turno-mt{background:#1565c0;color:#fff;font-weight:700}
+.cal-day.turno-gd{background:#1565c0;color:#fff;font-weight:700}
+.cal-day.turno-m{background:#ff8f00;color:#fff;font-weight:700}
+.cal-day.turno-t{background:#2e7d32;color:#fff;font-weight:700}
+.cal-day.selected{outline:3px solid var(--danger);outline-offset:1px}
+.cal-legend{display:flex;gap:1rem;margin-top:.5rem;font-size:.75rem;flex-wrap:wrap}
+.cal-legend span{display:inline-flex;align-items:center;gap:.3rem}
+.cal-legend-dot{width:14px;height:14px;border-radius:3px;display:inline-block}
+.sihce-tag{background:#ff6f00;color:#fff;padding:.1rem .4rem;border-radius:3px;font-size:.7rem;font-weight:700}
 @media(max-width:768px){.navbar{flex-wrap:wrap;height:auto;padding:.5rem 1rem;gap:.5rem}.nav-links{order:3;width:100%;padding-bottom:.5rem}.container{padding:1rem}.filter-row,.form-row{flex-direction:column}.filter-group{min-width:unset}.stats-grid{grid-template-columns:repeat(2,1fr)}.date-banner{flex-direction:column;align-items:flex-start}}
+@media print{.navbar,.btn,.no-print{display:none!important}.container{padding:0}.card{box-shadow:none;border:1px solid #ccc}}
 """
+
+ESPECIALIDADES_OPTIONS = '<option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option>'
 
 # ==============================================================================
 # HTML HELPERS
 # ==============================================================================
-def flash_html():
-    msgs = session.pop('_flashes', []) if '_flashes' in session else []
-    if not msgs:
-        return ''
-    html = '<div class="flash-container">'
-    for cat, msg in msgs:
-        html += f'<div class="flash flash-{cat}">{msg}<button class="flash-close" onclick="this.parentElement.remove()">×</button></div>'
-    html += '</div>'
-    return html
-
-def get_flashes():
-    """Get flash messages manually"""
-    msgs = []
-    flashes = session.pop('_flashes', [])
-    for f in flashes:
-        msgs.append(f)
-    return msgs
-
 def navbar_html():
     if 'user_id' not in session:
         return ''
     is_admin = session.get('user_rol') == 'admin'
     admin_links = ''
     if is_admin:
-        admin_links = f'''
+        admin_links = '''
         <a href="/generar" class="nav-link">⚙️ Generar</a>
         <a href="/profesionales" class="nav-link">👥 Profesionales</a>
         <a href="/usuarios" class="nav-link">🔑 Usuarios</a>
@@ -200,9 +201,10 @@ def navbar_html():
         <div class="nav-brand"><span style="font-size:1.4rem">🏥</span><span class="nav-title">SISTEMA DE CITAS</span></div>
         <div class="nav-links">
             <a href="/" class="nav-link">📅 Agenda</a>
+            <a href="/reporte_diario" class="nav-link">📋 Reporte Diario</a>
             {admin_links}
             <a href="/reportes" class="nav-link">📊 Reportes</a>
-            <a href="/exportar" class="nav-link">📥 Excel</a>
+            <a href="/exportar_form" class="nav-link">📥 Excel</a>
         </div>
         <div class="nav-user">
             <span class="user-badge">{session.get('user_nombre','')}</span>
@@ -280,6 +282,7 @@ def init_db():
             estado TEXT DEFAULT 'Disponible',
             tipo_paciente TEXT DEFAULT '',
             asistencia TEXT DEFAULT 'Pendiente',
+            sihce INTEGER DEFAULT 0,
             creado_por INTEGER,
             modificado_por INTEGER,
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -298,6 +301,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_citas_prof ON citas(profesional_id);
         CREATE INDEX IF NOT EXISTS idx_citas_estado ON citas(estado);
     ''')
+    # Add sihce column if missing (for upgrades)
+    try:
+        conn.execute("SELECT sihce FROM citas LIMIT 1")
+    except:
+        conn.execute("ALTER TABLE citas ADD COLUMN sihce INTEGER DEFAULT 0")
     admin = conn.execute("SELECT id FROM usuarios WHERE username='admin'").fetchone()
     if not admin:
         conn.execute("INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (?,?,?,?)",
@@ -333,7 +341,7 @@ def admin_required(f):
     return decorated
 
 # ==============================================================================
-# MOTOR DE GENERACIÓN
+# MOTOR DE GENERACIÓN - HORARIOS CORREGIDOS
 # ==============================================================================
 def parse_roster_text(text):
     result = {}
@@ -393,21 +401,42 @@ def generate_slots(conn, year, month, roster_text=None):
             conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
                 (prof_data['id'], year, month, day, shift))
             slots_to_create = []
-            if shift in ('M', 'MT', 'GD'):
-                start = "07:30"; n_slots = 8 if is_med else 7; dur = 40 if is_med else 45
-                slots_to_create.extend(_make_slots(start, n_slots, dur, 'MAÑANA'))
-            if shift in ('T', 'MT', 'GD'):
-                start = "14:00" if is_med else "13:50"; n_slots = 7 if is_med else 6; dur = 40 if is_med else 45
-                slots_to_create.extend(_make_slots(start, n_slots, dur, 'TARDE'))
+            if is_med:
+                # MÉDICO/PSIQUIATRA: 40 min por cita
+                if shift in ('M',):
+                    # Solo mañana: 7 citas + 1 hora administrativa
+                    slots_to_create.extend(_make_slots("07:30", 7, 40, 'MAÑANA'))
+                    slots_to_create.append({'inicio': '12:10', 'fin': '13:00', 'turno': 'ADMINISTRATIVA'})
+                elif shift in ('T',):
+                    # Solo tarde: inicia 13:30, 6 citas
+                    slots_to_create.extend(_make_slots("13:30", 6, 40, 'TARDE'))
+                elif shift in ('MT', 'GD'):
+                    # MT y GD mismo horario: mañana 8 + tarde 7
+                    slots_to_create.extend(_make_slots("07:30", 8, 40, 'MAÑANA'))
+                    slots_to_create.extend(_make_slots("14:00", 7, 40, 'TARDE'))
+            else:
+                # PSICÓLOGO y otros: 45 min por cita
+                if shift in ('M',):
+                    # Solo mañana: 6 citas + 1 hora administrativa
+                    slots_to_create.extend(_make_slots("07:30", 6, 45, 'MAÑANA'))
+                    slots_to_create.append({'inicio': '12:00', 'fin': '13:00', 'turno': 'ADMINISTRATIVA'})
+                elif shift in ('T',):
+                    # Solo tarde: inicia 13:30 para acabar ~18:00, 6 citas
+                    slots_to_create.extend(_make_slots("13:30", 6, 45, 'TARDE'))
+                elif shift in ('MT', 'GD'):
+                    # MT y GD mismo horario: mañana 7 + tarde 6
+                    slots_to_create.extend(_make_slots("07:30", 7, 45, 'MAÑANA'))
+                    slots_to_create.extend(_make_slots("13:45", 6, 45, 'TARDE'))
             prev_appointments = existing.get((prof_data['nombre'], date_str), [])
             prev_by_order = sorted(prev_appointments, key=lambda x: x['hora_inicio'])
             for i, slot in enumerate(slots_to_create):
-                pac=''; dni=''; cel=''; obs=''; estado='Disponible'; tipo=''; asist='Pendiente'; creado=None; modificado=None
+                pac=''; dni=''; cel=''; obs=''; estado='Disponible'; tipo=''; asist='Pendiente'; sihce=0
                 if i < len(prev_by_order):
                     prev = prev_by_order[i]; pac=prev['paciente']; dni=prev['dni']; cel=prev['celular']
                     obs=prev['observaciones']; estado=prev['estado']; tipo=prev['tipo_paciente']; asist=prev['asistencia']
-                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,celular,observaciones,estado,tipo_paciente,asistencia) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, cel, obs, estado, tipo, asist))
+                    sihce = prev.get('sihce', 0)
+                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,celular,observaciones,estado,tipo_paciente,asistencia,sihce) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, cel, obs, estado, tipo, asist, sihce))
                 count += 1
     conn.commit()
     return count
@@ -444,11 +473,10 @@ def login():
         error_html = '<div class="flash flash-danger" style="margin-bottom:1rem">Usuario o contraseña incorrectos</div>'
     else:
         error_html = ''
-
     return f'''<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Login - Sistema de Citas</title><style>{CSS}</style></head><body>
 <div class="login-wrapper"><div class="login-card">
-<div class="login-header"><span class="login-icon">🏥</span><h1>Sistema de Citas</h1><p>Centro de Salud Mental</p></div>
+<div class="login-header"><span class="login-icon">🏥</span><h1>Sistema de Citas</h1><p>Centro de Salud Mental Comunitario</p></div>
 {error_html}
 <form method="POST" class="login-form">
 <div class="form-group"><label for="username">Usuario</label><input type="text" id="username" name="username" required autofocus placeholder="Ingrese su usuario" class="form-input"></div>
@@ -463,6 +491,35 @@ def logout():
     session.clear()
     return redirect('/login')
 
+# ==============================================================================
+# API: FECHAS CON CALENDARIO VISUAL
+# ==============================================================================
+@app.route('/api/fechas/<int:prof_id>')
+@login_required
+def api_fechas(prof_id):
+    conn = get_db()
+    rows = conn.execute("SELECT DISTINCT fecha FROM citas WHERE profesional_id=? ORDER BY fecha", (prof_id,)).fetchall()
+    # Also get turno info per date
+    turno_map = {}
+    turno_rows = conn.execute("SELECT r.dia, r.turno, r.mes, r.anio FROM roles_mensuales r WHERE r.profesional_id=?", (prof_id,)).fetchall()
+    for tr in turno_rows:
+        key = f"{tr['anio']}-{tr['mes']:02d}-{tr['dia']:02d}"
+        turno_map[key] = tr['turno']
+    fechas = []
+    for r in rows:
+        turno = turno_map.get(r['fecha'], '')
+        try:
+            dt = datetime.strptime(r['fecha'], '%Y-%m-%d')
+            dia_sem = DIAS_CORTO[dt.weekday()]
+            fechas.append({'value': r['fecha'], 'label': f"{dt.day} {dia_sem} ({dt.strftime('%d/%m')})", 'turno': turno, 'day': dt.day, 'month': dt.month, 'year': dt.year, 'weekday': dt.weekday()})
+        except:
+            fechas.append({'value': r['fecha'], 'label': r['fecha'], 'turno': turno})
+    conn.close()
+    return jsonify(fechas)
+
+# ==============================================================================
+# AGENDA PRINCIPAL
+# ==============================================================================
 @app.route('/')
 @login_required
 def agenda():
@@ -471,60 +528,57 @@ def agenda():
     fecha = request.args.get('fecha', '')
     profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
 
-    # Build prof options
+    # Build prof options - LIMPIO sin colores de fondo
     prof_options = '<option value="">— Seleccionar profesional —</option>'
     for p in profesionales:
         sel = 'selected' if str(p['id']) == str(prof_id) else ''
-        prof_options += f'<option value="{p["id"]}" {sel} style="background-color:{p["color_bg"]};color:{p["color_font"]}">{p["nombre"]} ({p["especialidad"]})</option>'
-
-    # Build fecha options
-    fecha_options = '<option value="">— Seleccionar fecha —</option>'
-    if prof_id:
-        rows = conn.execute("SELECT DISTINCT fecha FROM citas WHERE profesional_id=? ORDER BY fecha", (prof_id,)).fetchall()
-        for r in rows:
-            try:
-                dt = datetime.strptime(r['fecha'], '%Y-%m-%d')
-                dia_sem = DIAS_CORTO[dt.weekday()]
-                label = f"{dt.day} {dia_sem} ({dt.strftime('%d/%m')})"
-            except: label = r['fecha']
-            sel = 'selected' if r['fecha'] == fecha else ''
-            fecha_options += f'<option value="{r["fecha"]}" {sel}>{label}</option>'
+        prof_options += f'<option value="{p["id"]}" {sel}>{p["nombre"]} ({p["especialidad"]})</option>'
 
     # Build citas table
     citas_html = ''
     if prof_id and fecha:
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.color_bg, p.color_font
             FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-            WHERE c.profesional_id=? AND c.fecha=? ORDER BY c.turno, c.hora_inicio""", (prof_id, fecha)).fetchall()
+            WHERE c.profesional_id=? AND c.fecha=? ORDER BY
+            CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END,
+            c.hora_inicio""", (prof_id, fecha)).fetchall()
 
         if citas:
-            # Date banner
             try:
                 dt = datetime.strptime(fecha, '%Y-%m-%d')
-                fecha_info = f"{dt.day} {DIAS_ES[dt.weekday()]} - {dt.strftime('%d/%m/%Y')}"
+                fecha_info = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
             except: fecha_info = fecha
-            total = len(citas)
+            total = len([c for c in citas if c['turno'] != 'ADMINISTRATIVA'])
             ocupados = sum(1 for c in citas if c['estado'] == 'Confirmado')
-            citas_html += f'''<div class="date-banner"><strong>{fecha_info}</strong>
+            prof_info = citas[0]
+            citas_html += f'''<div class="date-banner">
+                <span class="prof-chip" style="background:{prof_info['color_bg']};color:{prof_info['color_font']}">{prof_info['prof_nombre']}</span>
+                <strong>{fecha_info}</strong>
                 <span class="badge badge-info">{total} cupos</span>
                 <span class="badge badge-success">{total-ocupados} disponibles</span>
                 <span class="badge badge-danger">{ocupados} ocupados</span></div>'''
 
-            # Table
             citas_html += '''<div class="table-wrapper"><table class="citas-table"><thead><tr>
-                <th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>Estado</th><th>Asistencia</th><th>Acciones</th>
+                <th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>SIHCE</th><th>Estado</th><th>Asistencia</th><th>Acciones</th>
                 </tr></thead><tbody>'''
             current_turno = ''
             for c in citas:
                 if c['turno'] != current_turno:
                     current_turno = c['turno']
-                    icon = '☀️' if c['turno'] == 'MAÑANA' else '🌙'
-                    citas_html += f'<tr class="turno-divider"><td colspan="8"><span class="turno-label">{icon} {c["turno"]}</span></td></tr>'
+                    if c['turno'] == 'MAÑANA': icon = '☀️'
+                    elif c['turno'] == 'TARDE': icon = '🌙'
+                    else: icon = '📋'
+                    citas_html += f'<tr class="turno-divider"><td colspan="9"><span class="turno-label">{icon} {c["turno"]}</span></td></tr>'
+
+                if c['turno'] == 'ADMINISTRATIVA':
+                    citas_html += f'''<tr class="cita-row" style="background:#fff3e0;border-left:4px solid #ff9800">
+                        <td>ADM</td><td class="td-hora"><strong>{c['hora_inicio']} - {c['hora_fin']}</strong></td>
+                        <td colspan="7"><em style="color:#e65100">📋 Hora Administrativa</em></td></tr>'''
+                    continue
 
                 row_class = 'row-ocupado' if c['estado'] == 'Confirmado' else 'row-disponible'
                 style = f'border-left:4px solid {c["color_bg"]};' if c['estado'] == 'Confirmado' else ''
 
-                # Paciente cell
                 if c['estado'] == 'Confirmado':
                     pac_cell = f'<span class="paciente-nombre">{c["paciente"]}</span>'
                     if c['celular']: pac_cell += f'<br><small class="text-muted">📱 {c["celular"]}</small>'
@@ -532,17 +586,21 @@ def agenda():
                 else:
                     pac_cell = '<span class="text-available">Disponible</span>'
 
-                # Tipo badge
                 tipo_html = ''
                 if c['tipo_paciente']:
                     badge_class = 'badge-new' if c['tipo_paciente'] == 'NUEVO' else 'badge-cont'
                     tipo_html = f'<span class="badge {badge_class}">{c["tipo_paciente"]}</span>'
 
-                # Status
+                sihce_html = ''
+                if c['estado'] == 'Confirmado':
+                    sihce_val = c['sihce'] if c['sihce'] else 0
+                    if sihce_val:
+                        sihce_html = '<span class="sihce-tag">SIHCE</span>'
+                    sihce_html += f' <button class="btn-asist" onclick="toggleSihce({c["id"]},{1 if not sihce_val else 0})" title="Marcar/Quitar SIHCE">🔗</button>'
+
                 status_class = 'status-confirmado' if c['estado'] == 'Confirmado' else 'status-disponible'
                 status_html = f'<span class="status-dot {status_class}"></span>{c["estado"]}'
 
-                # Asistencia
                 asist_html = ''
                 if c['estado'] == 'Confirmado':
                     a_active = 'btn-asist-active' if c['asistencia'] == 'Asistió' else ''
@@ -551,17 +609,17 @@ def agenda():
                         <button class="btn-asist {a_active}" onclick="marcarAsistencia({c['id']},'Asistió')" title="Asistió">✅</button>
                         <button class="btn-asist {n_active}" onclick="marcarAsistencia({c['id']},'No asistió')" title="No asistió">❌</button></div>'''
 
-                # Actions
                 if c['estado'] == 'Disponible':
                     action = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{c["hora_inicio"]} - {c["hora_fin"]}\')">➕ Agendar</button>'
                 else:
-                    action = f'<form method="POST" action="/cita/eliminar/{c["id"]}" onsubmit="return confirm(\'¿Eliminar cita de {c["paciente"]}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
+                    pac_escaped = c["paciente"].replace("'", "\\'")
+                    action = f'<form method="POST" action="/cita/eliminar/{c["id"]}" onsubmit="return confirm(\'¿Eliminar cita de {pac_escaped}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
 
                 citas_html += f'''<tr class="cita-row {row_class}" style="{style}">
-                    <td class="td-turno">{c['turno']}</td>
+                    <td>{c['turno'][:3]}</td>
                     <td class="td-hora"><strong>{c['hora_inicio']} - {c['hora_fin']}</strong></td>
                     <td>{pac_cell}</td><td>{c['dni'] if c['estado']=='Confirmado' else ''}</td>
-                    <td>{tipo_html}</td><td>{status_html}</td><td>{asist_html}</td><td>{action}</td></tr>'''
+                    <td>{tipo_html}</td><td>{sihce_html}</td><td>{status_html}</td><td>{asist_html}</td><td>{action}</td></tr>'''
 
             citas_html += '</tbody></table></div>'
         else:
@@ -577,7 +635,9 @@ def agenda():
             <div class="filter-group"><label>Profesional</label>
                 <select id="sel-prof" class="form-select" onchange="onProfChange(this.value)">{prof_options}</select></div>
             <div class="filter-group"><label>Fecha</label>
-                <select id="sel-fecha" class="form-select" onchange="onFechaChange(this.value)">{fecha_options}</select></div>
+                <div id="cal-container"></div>
+                <input type="hidden" id="sel-fecha" value="{fecha}">
+            </div>
         </div>
     </div>
     {citas_html}
@@ -593,7 +653,10 @@ def agenda():
                         <div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
                         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div>
                     </div>
-                    <div class="form-group"><label>Tipo de paciente</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Tipo de paciente</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
+                        <div class="form-group"><label>SIHCE (atención conjunta)</label><select name="sihce" class="form-select"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div>
+                    </div>
                     <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" placeholder="Opcional"></div>
                 </div>
                 <div class="modal-footer">
@@ -604,33 +667,67 @@ def agenda():
         </div>
     </div>
     <script>
-    function onProfChange(v){{if(v)fetch('/api/fechas/'+v).then(r=>r.json()).then(d=>{{let s=document.getElementById('sel-fecha');s.innerHTML='<option value="">— Seleccionar fecha —</option>';d.forEach(f=>{{let o=document.createElement('option');o.value=f.value;o.textContent=f.label;s.appendChild(o)}})}})}};
-    function onFechaChange(f){{let p=document.getElementById('sel-prof').value;if(p&&f)window.location.href='/?prof_id='+p+'&fecha='+f}};
+    let fechasData=[];
+    function onProfChange(v){{
+        if(!v){{document.getElementById('cal-container').innerHTML='';return}}
+        fetch('/api/fechas/'+v).then(r=>r.json()).then(d=>{{
+            fechasData=d;
+            renderCalendar(d);
+        }})
+    }};
+    function renderCalendar(fechas){{
+        let container=document.getElementById('cal-container');
+        if(!fechas.length){{container.innerHTML='<p class="text-muted" style="padding:.5rem">Sin fechas programadas</p>';return}}
+        let months={{}};
+        fechas.forEach(f=>{{let k=f.year+'-'+f.month;if(!months[k])months[k]={{year:f.year,month:f.month,dates:{{}}}};months[k].dates[f.day]={{turno:f.turno,value:f.value}}}});
+        let meses=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+        let dias=['L','M','M','J','V','S','D'];
+        let html='';
+        let selFecha=document.getElementById('sel-fecha').value;
+        Object.values(months).forEach(m=>{{
+            html+='<div style="margin-bottom:.5rem"><strong style="font-size:.82rem">'+meses[m.month]+' '+m.year+'</strong>';
+            html+='<div class="cal-grid">';
+            dias.forEach(d=>html+='<div class="cal-header">'+d+'</div>');
+            let firstDay=new Date(m.year,m.month-1,1).getDay();
+            firstDay=firstDay===0?6:firstDay-1;
+            for(let i=0;i<firstDay;i++)html+='<div class="cal-day empty"></div>';
+            let daysInMonth=new Date(m.year,m.month,0).getDate();
+            for(let d=1;d<=daysInMonth;d++){{
+                let info=m.dates[d];
+                if(info){{
+                    let cls='turno-'+info.turno.toLowerCase();
+                    let sel=info.value===selFecha?' selected':'';
+                    html+='<div class="cal-day '+cls+sel+'" onclick="selectDate(\''+info.value+'\')" title="'+info.turno+'">'+d+'</div>';
+                }}else{{
+                    html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
+                }}
+            }}
+            html+='</div>';
+            html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> Mañana</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> Tarde</span></div>';
+            html+='</div>';
+        }});
+        container.innerHTML=html;
+    }};
+    function selectDate(fecha){{
+        let p=document.getElementById('sel-prof').value;
+        if(p&&fecha)window.location.href='/?prof_id='+p+'&fecha='+fecha;
+    }};
     function openModal(id,hora){{document.getElementById('modal-cita-id').value=id;document.getElementById('modal-hora').textContent='🕐 '+hora;document.getElementById('modal-agendar').style.display='flex'}};
     function closeModal(){{document.getElementById('modal-agendar').style.display='none'}};
     function marcarAsistencia(id,estado){{fetch('/cita/asistencia/'+id+'/'+encodeURIComponent(estado),{{method:'POST'}}).then(()=>location.reload())}};
+    function toggleSihce(id,val){{fetch('/cita/sihce/'+id+'/'+val,{{method:'POST'}}).then(()=>location.reload())}};
     document.getElementById('modal-agendar')?.addEventListener('click',function(e){{if(e.target===this)closeModal()}});
+    // Auto-load if prof_id is set
+    let initProf=document.getElementById('sel-prof').value;
+    if(initProf)onProfChange(initProf);
     </script>'''
 
     flash_msgs = session.pop('_flashes', [])
     return page('Agenda - Sistema de Citas', content, flash_msgs)
 
-@app.route('/api/fechas/<int:prof_id>')
-@login_required
-def api_fechas(prof_id):
-    conn = get_db()
-    rows = conn.execute("SELECT DISTINCT fecha FROM citas WHERE profesional_id=? ORDER BY fecha", (prof_id,)).fetchall()
-    fechas = []
-    for r in rows:
-        try:
-            dt = datetime.strptime(r['fecha'], '%Y-%m-%d')
-            dia_sem = DIAS_CORTO[dt.weekday()]
-            fechas.append({'value': r['fecha'], 'label': f"{dt.day} {dia_sem} ({dt.strftime('%d/%m')})"})
-        except:
-            fechas.append({'value': r['fecha'], 'label': r['fecha']})
-    conn.close()
-    return jsonify(fechas)
-
+# ==============================================================================
+# CITAS: AGENDAR, ELIMINAR, ASISTENCIA, SIHCE
+# ==============================================================================
 @app.route('/cita/agendar', methods=['POST'])
 @login_required
 def agendar_cita():
@@ -640,6 +737,7 @@ def agendar_cita():
     celular = request.form.get('celular', '').strip()
     obs = request.form.get('observaciones', '').strip()
     tipo = request.form.get('tipo_paciente', 'NUEVO')
+    sihce = int(request.form.get('sihce', 0))
     if not paciente:
         flash('El nombre del paciente es obligatorio', 'danger')
         return redirect(request.referrer or '/')
@@ -649,8 +747,8 @@ def agendar_cita():
         flash('Cupo no disponible', 'warning')
         conn.close()
         return redirect(request.referrer or '/')
-    conn.execute("UPDATE citas SET paciente=?, dni=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
-        (paciente, dni, celular, obs, tipo, session['user_id'], session['user_id'], cita_id))
+    conn.execute("UPDATE citas SET paciente=?, dni=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        (paciente, dni, celular, obs, tipo, sihce, session['user_id'], session['user_id'], cita_id))
     conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
         (cita_id, session['user_id'], 'AGENDAR', f'Paciente: {paciente} | DNI: {dni}'))
     conn.commit(); conn.close()
@@ -663,7 +761,7 @@ def eliminar_cita(cita_id):
     conn = get_db()
     cita = conn.execute("SELECT * FROM citas WHERE id=?", (cita_id,)).fetchone()
     if cita and cita['estado'] != 'Disponible':
-        conn.execute("UPDATE citas SET paciente='',dni='',celular='',observaciones='',estado='Disponible',tipo_paciente='',asistencia='Pendiente',modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        conn.execute("UPDATE citas SET paciente='',dni='',celular='',observaciones='',estado='Disponible',tipo_paciente='',asistencia='Pendiente',sihce=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
             (session['user_id'], cita_id))
         conn.execute("INSERT INTO historial (cita_id,usuario_id,accion,detalle) VALUES (?,?,?,?)",
             (cita_id, session['user_id'], 'ELIMINAR', f'Eliminado: {cita["paciente"]}'))
@@ -683,6 +781,74 @@ def marcar_asistencia(cita_id, estado):
     conn.commit(); conn.close()
     return jsonify({'ok': True})
 
+@app.route('/cita/sihce/<int:cita_id>/<int:val>', methods=['POST'])
+@login_required
+def toggle_sihce(cita_id, val):
+    conn = get_db()
+    conn.execute("UPDATE citas SET sihce=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?", (val, session['user_id'], cita_id))
+    conn.commit(); conn.close()
+    return jsonify({'ok': True})
+
+# ==============================================================================
+# REPORTE DIARIO - Pacientes programados por día
+# ==============================================================================
+@app.route('/reporte_diario')
+@login_required
+def reporte_diario():
+    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    conn = get_db()
+    citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE c.fecha=? AND c.estado='Confirmado'
+        ORDER BY p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
+    conn.close()
+
+    try:
+        dt = datetime.strptime(fecha, '%Y-%m-%d')
+        fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+    except: fecha_display = fecha
+
+    rows = ''
+    current_prof = ''
+    num = 0
+    for c in citas:
+        if c['prof_nombre'] != current_prof:
+            current_prof = c['prof_nombre']
+            num = 0
+            rows += f'''<tr style="background:{c['color_bg']};color:{c['color_font']}">
+                <td colspan="7" style="padding:.6rem;font-weight:700">{c['prof_nombre']} — {c['especialidad']}</td></tr>'''
+        num += 1
+        sihce_tag = ' <span class="sihce-tag">SIHCE</span>' if c['sihce'] else ''
+        rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
+            <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
+            <td><strong>{c['paciente']}</strong>{sihce_tag}</td><td>{c['dni']}</td>
+            <td><span class="badge {'badge-new' if c['tipo_paciente']=='NUEVO' else 'badge-cont'}">{c['tipo_paciente']}</span></td>
+            <td>{c['observaciones']}</td></tr>'''
+
+    if not citas:
+        rows = '<tr><td colspan="7" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
+
+    content = f'''<div class="page-header"><h2>📋 Reporte Diario - Pacientes Programados</h2>
+        <p class="text-muted" style="font-size:.9rem">Para sacar historias clínicas</p></div>
+    <div class="card no-print" style="padding:1rem">
+        <form method="GET" class="filter-row">
+            <div class="filter-group"><label>Fecha</label><input type="date" name="fecha" value="{fecha}" class="form-input"></div>
+            <div class="filter-group" style="align-self:flex-end"><button type="submit" class="btn btn-primary">🔍 Consultar</button>
+            <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimir</button></div>
+        </form>
+    </div>
+    <div class="card">
+        <h3>📅 {fecha_display} — {len(citas)} pacientes programados</h3>
+        <div class="table-wrapper"><table class="citas-table"><thead><tr>
+            <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>Observaciones</th>
+        </tr></thead><tbody>{rows}</tbody></table></div>
+    </div>'''
+    flash_msgs = session.pop('_flashes', [])
+    return page('Reporte Diario - Sistema de Citas', content, flash_msgs)
+
+# ==============================================================================
+# GENERAR CALENDARIO
+# ==============================================================================
 @app.route('/generar', methods=['GET', 'POST'])
 @admin_required
 def generar():
@@ -696,13 +862,12 @@ def generar():
         conn = get_db()
         count = generate_slots(conn, year, month, roster_text)
         conn.close()
-        flash(f'✅ Generados {count} cupos para {calendar.month_name[month]} {year}', 'success')
-        return redirect(f'/?year={year}&month={month}')
+        flash(f'✅ Generados {count} cupos para {MESES_ES[month]} {year}', 'success')
+        return redirect('/')
 
-    meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-    month_opts = ''.join([f'<option value="{i+1}" {"selected" if i+1==datetime.now().month else ""}>{m}</option>' for i, m in enumerate(meses)])
+    month_opts = ''.join([f'<option value="{i}" {"selected" if i==datetime.now().month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
 
-    content = f'''<div class="page-header"><h2>⚙️ Generar Calendario Mensual</h2><p class="text-muted" style="margin-top:.25rem;font-size:.9rem">Ingrese el rol mensual para generar los cupos de citas</p></div>
+    content = f'''<div class="page-header"><h2>⚙️ Generar Calendario Mensual</h2></div>
     <div class="card"><form method="POST">
         <div class="form-row">
             <div class="form-group"><label>Año</label><input type="number" name="year" value="{datetime.now().year}" class="form-input" min="2024" max="2030"></div>
@@ -710,13 +875,18 @@ def generar():
         </div>
         <div class="form-group"><label>Texto del Rol Mensual</label>
             <textarea name="roster_text" class="form-textarea" rows="16">{get_default_roster()}</textarea>
-            <small class="form-help">Formato: NOMBRE: Día X TURNO. Turnos: M=Mañana, T=Tarde, MT=Mañana+Tarde, GD=Guardia Diurna.<br>⚠️ Si ya existen citas agendadas, se migrarán automáticamente a los nuevos cupos.</small>
+            <small class="form-help">Formato: NOMBRE: Día X TURNO. Turnos: M=Mañana, T=Tarde, MT=Mañana+Tarde, GD=Guardia Diurna.<br>
+            ⚠️ M: mañana + hora administrativa | T: inicia 1:30pm | MT y GD: mismo horario completo<br>
+            ⚠️ Si ya existen citas agendadas, se migrarán automáticamente.</small>
         </div>
         <div class="form-actions"><button type="submit" class="btn btn-danger btn-lg" onclick="return confirm('¿Generar cupos? Las citas existentes se migrarán al nuevo horario.')">🔄 REGENERAR CALENDARIO</button></div>
     </form></div>'''
     flash_msgs = session.pop('_flashes', [])
     return page('Generar - Sistema de Citas', content, flash_msgs)
 
+# ==============================================================================
+# PROFESIONALES
+# ==============================================================================
 @app.route('/profesionales')
 @admin_required
 def profesionales():
@@ -727,27 +897,27 @@ def profesionales():
     rows = ''
     for p in profs:
         inactive = 'row-inactive' if not p['activo'] else ''
-        status_badge = f'<span class="badge badge-success">Activo</span>' if p['activo'] else '<span class="badge badge-danger">Inactivo</span>'
-        btn_text = '⏸️ Desactivar' if p['activo'] else '▶️ Activar'
+        status_badge = '<span class="badge badge-success">Activo</span>' if p['activo'] else '<span class="badge badge-danger">Inactivo</span>'
+        btn_text = '⏸️' if p['activo'] else '▶️'
         btn_class = 'btn-warning' if p['activo'] else 'btn-success'
-        esp_psic = 'selected' if p['especialidad'] == 'PSICOLOGÍA' else ''
-        esp_med = 'selected' if p['especialidad'] == 'MEDICINA' else ''
-        esp_psiq = 'selected' if p['especialidad'] == 'PSIQUIATRÍA' else ''
-        esp_to = 'selected' if p['especialidad'] == 'TERAPIA OCUPACIONAL' else ''
+        esp_opts = ''
+        for esp in ['PSICOLOGÍA', 'MEDICINA', 'PSIQUIATRÍA', 'TERAPIA OCUPACIONAL']:
+            sel = 'selected' if p['especialidad'] == esp else ''
+            esp_opts += f'<option value="{esp}" {sel}>{esp}</option>'
         font_b = 'selected' if p['color_font'] == 'black' else ''
         font_w = 'selected' if p['color_font'] == 'white' else ''
         rows += f'''<tr class="{inactive}">
             <td><span class="color-swatch" style="background:{p['color_bg']};color:{p['color_font']}">Aa</span></td>
             <td><strong>{p['nombre']}</strong></td><td>{p['especialidad']}</td><td>{status_badge}</td>
             <td style="white-space:nowrap">
-                <button class="btn btn-sm btn-primary" onclick="document.getElementById('edit-{p['id']}').style.display=document.getElementById('edit-{p['id']}').style.display==='none'?'table-row':'none'">✏️ Editar</button>
+                <button class="btn btn-sm btn-primary" onclick="document.getElementById('edit-{p['id']}').style.display=document.getElementById('edit-{p['id']}').style.display==='none'?'table-row':'none'">✏️</button>
                 <form method="POST" action="/profesional/toggle/{p['id']}" style="display:inline"><button type="submit" class="btn btn-sm {btn_class}">{btn_text}</button></form>
             </td></tr>
             <tr id="edit-{p['id']}" style="display:none;background:#f0f9ff">
             <td colspan="5">
                 <form method="POST" action="/profesional/editar/{p['id']}" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;padding:.5rem">
                     <div class="form-group" style="flex:2;margin:0"><label>Nombre</label><input type="text" name="nombre" value="{p['nombre']}" class="form-input" required></div>
-                    <div class="form-group" style="flex:1;margin:0"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA" {esp_psic}>PSICOLOGÍA</option><option value="MEDICINA" {esp_med}>MEDICINA</option><option value="PSIQUIATRÍA" {esp_psiq}>PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL" {esp_to}>TERAPIA OCUPACIONAL</option></select></div>
+                    <div class="form-group" style="flex:1;margin:0"><label>Especialidad</label><select name="especialidad" class="form-select">{esp_opts}</select></div>
                     <div class="form-group" style="margin:0"><label>Color</label><input type="color" name="color_bg" value="{p['color_bg']}" class="form-color"></div>
                     <div class="form-group" style="margin:0"><label>Texto</label><select name="color_font" class="form-select"><option value="black" {font_b}>Negro</option><option value="white" {font_w}>Blanco</option></select></div>
                     <button type="submit" class="btn btn-sm btn-success">💾 Guardar</button>
@@ -759,7 +929,7 @@ def profesionales():
     <form method="POST" action="/profesional/nuevo">
         <div class="form-row">
             <div class="form-group" style="flex:2"><label>Nombre completo</label><input type="text" name="nombre" class="form-input" required placeholder="APELLIDO APELLIDO NOMBRE NOMBRE"></div>
-            <div class="form-group"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option></select></div>
+            <div class="form-group"><label>Especialidad</label><select name="especialidad" class="form-select">{ESPECIALIDADES_OPTIONS}</select></div>
             <div class="form-group"><label>Color fondo</label><input type="color" name="color_bg" value="#CCCCCC" class="form-color"></div>
             <div class="form-group"><label>Color texto</label><select name="color_font" class="form-select"><option value="black">Negro</option><option value="white">Blanco</option></select></div>
         </div>
@@ -793,17 +963,6 @@ def nuevo_profesional():
     conn.close()
     return redirect('/profesionales')
 
-@app.route('/profesional/toggle/<int:prof_id>', methods=['POST'])
-@admin_required
-def toggle_profesional(prof_id):
-    conn = get_db()
-    prof = conn.execute("SELECT * FROM profesionales WHERE id=?", (prof_id,)).fetchone()
-    if prof:
-        conn.execute("UPDATE profesionales SET activo=? WHERE id=?", (0 if prof['activo'] else 1, prof_id))
-        conn.commit()
-    conn.close()
-    return redirect('/profesionales')
-
 @app.route('/profesional/editar/<int:prof_id>', methods=['POST'])
 @admin_required
 def editar_profesional(prof_id):
@@ -817,11 +976,24 @@ def editar_profesional(prof_id):
     conn = get_db()
     conn.execute("UPDATE profesionales SET nombre=?, especialidad=?, color_bg=?, color_font=? WHERE id=?",
         (nombre, esp, color_bg, color_font, prof_id))
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     flash(f'Profesional actualizado: {nombre}', 'success')
     return redirect('/profesionales')
 
+@app.route('/profesional/toggle/<int:prof_id>', methods=['POST'])
+@admin_required
+def toggle_profesional(prof_id):
+    conn = get_db()
+    prof = conn.execute("SELECT * FROM profesionales WHERE id=?", (prof_id,)).fetchone()
+    if prof:
+        conn.execute("UPDATE profesionales SET activo=? WHERE id=?", (0 if prof['activo'] else 1, prof_id))
+        conn.commit()
+    conn.close()
+    return redirect('/profesionales')
+
+# ==============================================================================
+# USUARIOS
+# ==============================================================================
 @app.route('/usuarios')
 @admin_required
 def usuarios():
@@ -831,9 +1003,8 @@ def usuarios():
     rows = ''
     for u in users:
         inactive = 'row-inactive' if not u['activo'] else ''
-        role_badge = f'<span class="badge badge-admin">ADMIN</span>' if u['rol'] == 'admin' else '<span class="badge badge-info">OPERADOR</span>'
+        role_badge = '<span class="badge badge-admin">ADMIN</span>' if u['rol'] == 'admin' else '<span class="badge badge-info">OPERADOR</span>'
         status_badge = '<span class="badge badge-success">Activo</span>' if u['activo'] else '<span class="badge badge-danger">Inactivo</span>'
-        action = ''
         if u['id'] != session.get('user_id'):
             btn = '⏸️' if u['activo'] else '▶️'
             btn_class = 'btn-warning' if u['activo'] else 'btn-success'
@@ -894,6 +1065,9 @@ def toggle_usuario(user_id):
     conn.close()
     return redirect('/usuarios')
 
+# ==============================================================================
+# REPORTES
+# ==============================================================================
 @app.route('/reportes')
 @login_required
 def reportes():
@@ -907,8 +1081,10 @@ def reportes():
         SUM(CASE WHEN asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
         SUM(CASE WHEN asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN tipo_paciente='NUEVO' THEN 1 ELSE 0 END) as nuevos,
-        SUM(CASE WHEN tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores
-        FROM citas WHERE strftime('%Y',fecha)=? AND strftime('%m',fecha)=?""", (str(year), f"{month:02d}")).fetchone()
+        SUM(CASE WHEN tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores,
+        SUM(CASE WHEN sihce=1 THEN 1 ELSE 0 END) as sihce_total
+        FROM citas WHERE strftime('%Y',fecha)=? AND strftime('%m',fecha)=? AND turno!='ADMINISTRATIVA'""",
+        (str(year), f"{month:02d}")).fetchone()
 
     by_prof = conn.execute("""SELECT p.nombre, p.color_bg, p.color_font, p.especialidad,
         COUNT(*) as total,
@@ -916,18 +1092,14 @@ def reportes():
         SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
         SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN c.tipo_paciente='NUEVO' THEN 1 ELSE 0 END) as nuevos,
-        SUM(CASE WHEN c.tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores
+        SUM(CASE WHEN c.tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores,
+        SUM(CASE WHEN c.sihce=1 THEN 1 ELSE 0 END) as sihce_count
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA'
         GROUP BY p.id ORDER BY p.orden""", (str(year), f"{month:02d}")).fetchall()
-
-    historial = conn.execute("""SELECT h.*, u.nombre as usuario_nombre, c.paciente, c.fecha, p.nombre as prof_nombre
-        FROM historial h LEFT JOIN usuarios u ON u.id=h.usuario_id LEFT JOIN citas c ON c.id=h.cita_id
-        LEFT JOIN profesionales p ON p.id=c.profesional_id ORDER BY h.fecha_hora DESC LIMIT 50""").fetchall()
     conn.close()
 
-    meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
-    month_opts = ''.join([f'<option value="{i+1}" {"selected" if i+1==month else ""}>{m}</option>' for i, m in enumerate(meses)])
+    month_opts = ''.join([f'<option value="{i}" {"selected" if i==month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
 
     total = stats['total'] or 0
     confirmados = stats['confirmados'] or 0
@@ -950,17 +1122,8 @@ def reportes():
         prof_rows += f'''<tr><td><span class="prof-chip" style="background:{p['color_bg']};color:{p['color_font']}">{p['nombre']}</span></td>
             <td>{p['especialidad']}</td><td><strong>{p['total']}</strong></td><td>{p['confirmados'] or 0}</td>
             <td class="text-success">{p['asistieron'] or 0}</td><td class="text-danger">{p['no_asistieron'] or 0}</td>
-            <td>{p['nuevos'] or 0}</td><td>{p['continuadores'] or 0}</td>
+            <td>{p['nuevos'] or 0}</td><td>{p['continuadores'] or 0}</td><td>{p['sihce_count'] or 0}</td>
             <td><div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div><small>{pct}%</small></td></tr>'''
-
-    hist_rows = ''
-    for h in historial:
-        badge_class = 'badge-success' if h['accion'] == 'AGENDAR' else 'badge-danger' if h['accion'] == 'ELIMINAR' else 'badge-info'
-        hist_rows += f'''<tr><td><small>{h['fecha_hora']}</small></td><td>{h['usuario_nombre'] or '—'}</td>
-            <td><span class="badge {badge_class}">{h['accion']}</span></td>
-            <td><small>{h['prof_nombre'] or '—'}</small></td><td><small>{h['detalle'] or ''}</small></td></tr>'''
-    if not historial:
-        hist_rows = '<tr><td colspan="5" class="text-center">Sin registros</td></tr>'
 
     content = f'''<div class="page-header"><h2>📊 Reportes y Estadísticas</h2></div>
     <div class="card" style="padding:1rem"><form method="GET" class="filter-row">
@@ -970,13 +1133,30 @@ def reportes():
     </form></div>
     {stats_html}
     <div class="card"><h3>📋 Por Profesional</h3><div class="table-wrapper"><table class="citas-table"><thead><tr>
-        <th>Profesional</th><th>Especialidad</th><th>Cupos</th><th>Confirmados</th><th>Asistieron</th><th>No asistieron</th><th>Nuevos</th><th>Continuadores</th><th>% Ocupación</th>
-    </tr></thead><tbody>{prof_rows}</tbody></table></div></div>
-    <div class="card"><h3>📜 Historial Reciente</h3><div class="table-wrapper"><table class="citas-table"><thead><tr>
-        <th>Fecha/Hora</th><th>Usuario</th><th>Acción</th><th>Profesional</th><th>Detalle</th>
-    </tr></thead><tbody>{hist_rows}</tbody></table></div></div>'''
+        <th>Profesional</th><th>Especialidad</th><th>Cupos</th><th>Confirmados</th><th>Asistieron</th><th>No asistieron</th><th>Nuevos</th><th>Continuadores</th><th>SIHCE</th><th>% Ocupación</th>
+    </tr></thead><tbody>{prof_rows}</tbody></table></div></div>'''
     flash_msgs = session.pop('_flashes', [])
     return page('Reportes - Sistema de Citas', content, flash_msgs)
+
+# ==============================================================================
+# EXPORTAR EXCEL - CON COLORES Y FORMULARIO
+# ==============================================================================
+@app.route('/exportar_form')
+@login_required
+def exportar_form():
+    month_opts = ''.join([f'<option value="{i}" {"selected" if i==datetime.now().month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
+    content = f'''<div class="page-header"><h2>📥 Exportar a Excel</h2></div>
+    <div class="card">
+        <form method="GET" action="/exportar">
+            <div class="form-row">
+                <div class="form-group"><label>Año</label><input type="number" name="year" value="{datetime.now().year}" class="form-input" min="2024" max="2030"></div>
+                <div class="form-group"><label>Mes</label><select name="month" class="form-select">{month_opts}</select></div>
+            </div>
+            <div class="form-actions"><button type="submit" class="btn btn-success btn-lg">📥 Descargar Excel</button></div>
+        </form>
+    </div>'''
+    flash_msgs = session.pop('_flashes', [])
+    return page('Exportar Excel - Sistema de Citas', content, flash_msgs)
 
 @app.route('/exportar')
 @login_required
@@ -986,39 +1166,56 @@ def exportar_excel():
     conn = get_db()
     rows = conn.execute("""SELECT c.fecha, c.turno, c.area, p.nombre as profesional,
         c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.celular, c.observaciones, c.estado,
-        c.tipo_paciente, c.asistencia, p.color_bg, p.color_font
+        c.tipo_paciente, c.asistencia, c.sihce, p.color_bg, p.color_font
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
-        ORDER BY c.fecha, c.turno, p.orden, c.hora_inicio""", (str(year), f"{month:02d}")).fetchall()
+        ORDER BY c.fecha, p.orden, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, c.hora_inicio""",
+        (str(year), f"{month:02d}")).fetchall()
     conn.close()
+
     output = io.BytesIO()
     wb = xlsxwriter.Workbook(output, {'in_memory': True})
     ws = wb.add_worksheet('AGENDA')
-    fmt_h = wb.add_format({'bold': True, 'bg_color': '#404040', 'font_color': 'white', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
-    fmt_date = wb.add_format({'bg_color': '#000000', 'font_color': 'white', 'bold': True, 'align': 'center', 'valign': 'vcenter', 'border': 1})
-    headers = ['FECHA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'ASISTENCIA']
-    for i, h in enumerate(headers): ws.write(0, i, h, fmt_h)
-    ws.set_column(0, 0, 12); ws.set_column(1, 2, 12); ws.set_column(3, 3, 35); ws.set_column(4, 4, 15); ws.set_column(5, 5, 35)
+    fmt_h = wb.add_format({'bold': True, 'bg_color': '#1a365d', 'font_color': 'white', 'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 10})
+    fmt_title = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter'})
+
+    # Title
+    ws.merge_range(0, 0, 0, 12, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
+
+    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'SIHCE']
+    for i, h in enumerate(headers): ws.write(2, i, h, fmt_h)
+    ws.set_column(0, 0, 12); ws.set_column(1, 1, 10); ws.set_column(2, 2, 12); ws.set_column(3, 3, 14)
+    ws.set_column(4, 4, 35); ws.set_column(5, 5, 15); ws.set_column(6, 6, 35); ws.set_column(7, 7, 10)
+    ws.set_column(8, 8, 12); ws.set_column(9, 9, 25); ws.set_column(10, 11, 14); ws.set_column(12, 12, 8)
+
     fmt_cache = {}
     for i, row in enumerate(rows):
-        r = i + 1; row = dict(row)
+        r = i + 3; row = dict(row)
         key = (row['color_bg'], row['color_font'])
         if key not in fmt_cache:
             fmt_cache[key] = {
-                'c': wb.add_format({'bg_color': key[0], 'font_color': key[1], 'border': 1, 'align': 'center', 'valign': 'vcenter'}),
-                'l': wb.add_format({'bg_color': key[0], 'font_color': key[1], 'border': 1, 'align': 'left', 'valign': 'vcenter', 'indent': 1}),
+                'c': wb.add_format({'bg_color': key[0], 'font_color': key[1], 'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 9}),
+                'l': wb.add_format({'bg_color': key[0], 'font_color': key[1], 'border': 1, 'align': 'left', 'valign': 'vcenter', 'font_size': 9}),
+                'b': wb.add_format({'bg_color': key[0], 'font_color': key[1], 'border': 1, 'align': 'left', 'valign': 'vcenter', 'font_size': 9, 'bold': True}),
             }
         try:
-            dt = datetime.strptime(row['fecha'], '%Y-%m-%d'); fecha_vis = f"{dt.day} {DIAS_CORTO[dt.weekday()]}"
-        except: fecha_vis = row['fecha']
+            dt = datetime.strptime(row['fecha'], '%Y-%m-%d')
+            fecha_vis = dt.strftime('%d/%m/%Y')
+            dia_sem = DIAS_CORTO[dt.weekday()]
+        except:
+            fecha_vis = row['fecha']; dia_sem = ''
         hora = f"{row['hora_inicio']} - {row['hora_fin']}"
-        fc = fmt_cache[key]['c']; fl = fmt_cache[key]['l']
-        ws.write(r, 0, fecha_vis, fmt_date); ws.write(r, 1, row['turno'], fc); ws.write(r, 2, row['area'], fc)
-        ws.write(r, 3, row['profesional'], fl); ws.write(r, 4, hora, fc); ws.write(r, 5, row['paciente'], fl)
-        ws.write(r, 6, row['dni'], fc); ws.write(r, 7, row['celular'], fc); ws.write(r, 8, row['observaciones'], fl)
-        ws.write(r, 9, row['estado'], fc); ws.write(r, 10, row['tipo_paciente'], fc); ws.write(r, 11, row['asistencia'], fc)
+        fc = fmt_cache[key]['c']; fl = fmt_cache[key]['l']; fb = fmt_cache[key]['b']
+        ws.write(r, 0, fecha_vis, fc); ws.write(r, 1, dia_sem, fc); ws.write(r, 2, row['turno'], fc)
+        ws.write(r, 3, row['area'], fc); ws.write(r, 4, row['profesional'], fb)
+        ws.write(r, 5, hora, fc); ws.write(r, 6, row['paciente'], fl)
+        ws.write(r, 7, row['dni'], fc); ws.write(r, 8, row['celular'], fc)
+        ws.write(r, 9, row['observaciones'], fl); ws.write(r, 10, row['estado'], fc)
+        ws.write(r, 11, row['tipo_paciente'], fc)
+        ws.write(r, 12, 'SIHCE' if row['sihce'] else '', fc)
+
     wb.close(); output.seek(0)
-    filename = f"Agenda_{calendar.month_name[month]}_{year}.xlsx"
+    filename = f"Agenda_{MESES_ES[month]}_{year}.xlsx"
     return send_file(output, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 # ==============================================================================

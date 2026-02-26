@@ -183,7 +183,7 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 @media print{.navbar,.btn,.no-print{display:none!important}.container{padding:0}.card{box-shadow:none;border:1px solid #ccc}}
 """
 
-ESPECIALIDADES_OPTIONS = '<option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option><option value="TERAPIA DE LENGUAJE">TERAPIA DE LENGUAJE</option>'
+ESPECIALIDADES_OPTIONS = '<option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option><option value="TERAPIA DE LENGUAJE">TERAPIA DE LENGUAJE</option><option value="SIHCE">SIHCE</option>'
 
 # ==============================================================================
 # HTML HELPERS
@@ -416,7 +416,7 @@ def generate_slots(conn, year, month, roster_text=None):
                 if n1 in n2 or n2 in n1: prof_data = db_data; break
             if not prof_data: continue
             shift = schedule[day]
-            is_med = prof_data['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA')
+            is_med = prof_data['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA', 'SIHCE')
             is_to = prof_data['especialidad'] == 'TERAPIA OCUPACIONAL'
             date_str = curr_date.strftime('%Y-%m-%d')
             conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
@@ -959,7 +959,7 @@ def profesionales():
         btn_text = '⏸️' if p['activo'] else '▶️'
         btn_class = 'btn-warning' if p['activo'] else 'btn-success'
         esp_opts = ''
-        for esp in ['PSICOLOGÍA', 'MEDICINA', 'PSIQUIATRÍA', 'TERAPIA OCUPACIONAL', 'TERAPIA DE LENGUAJE']:
+        for esp in ['PSICOLOGÍA', 'MEDICINA', 'PSIQUIATRÍA', 'TERAPIA OCUPACIONAL', 'TERAPIA DE LENGUAJE', 'SIHCE']:
             sel = 'selected' if p['especialidad'] == esp else ''
             esp_opts += f'<option value="{esp}" {sel}>{esp}</option>'
         font_b = 'selected' if p['color_font'] == 'black' else ''
@@ -1227,7 +1227,7 @@ def exportar_excel():
         c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, c.sihce_prof_id, p.color_bg, p.color_font
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
-        ORDER BY c.fecha, p.orden, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, c.hora_inicio""",
+        ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, p.orden, c.hora_inicio""",
         (str(year), f"{month:02d}")).fetchall()
     conn.close()
 
@@ -1236,6 +1236,7 @@ def exportar_excel():
     ws = wb.add_worksheet('AGENDA')
     fmt_h = wb.add_format({'bold': True, 'bg_color': '#1a365d', 'font_color': 'white', 'border': 1, 'align': 'center', 'valign': 'vcenter', 'font_size': 10})
     fmt_title = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter'})
+    fmt_sep = wb.add_format({'bold': True, 'bg_color': '#f1f5f9', 'font_size': 11, 'border': 1, 'align': 'left', 'valign': 'vcenter'})
 
     # Title
     ws.merge_range(0, 0, 0, 15, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
@@ -1248,8 +1249,27 @@ def exportar_excel():
     ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8)
 
     fmt_cache = {}
-    for i, row in enumerate(rows):
-        r = i + 3; row = dict(row)
+    r = 3
+    prev_date = ''; prev_turno = ''
+    for row in rows:
+        row = dict(row)
+        # Separator row when date or turno changes
+        curr_date = row['fecha']; curr_turno = row['turno']
+        if curr_date != prev_date or (curr_turno != prev_turno and curr_turno in ('MAÑANA','TARDE')):
+            if curr_date != prev_date:
+                try:
+                    dt_sep = datetime.strptime(curr_date, '%Y-%m-%d')
+                    sep_text = f"{DIAS_ES[dt_sep.weekday()]} {dt_sep.day} DE {MESES_ES[dt_sep.month].upper()} {dt_sep.year}"
+                except: sep_text = curr_date
+            if curr_turno in ('MAÑANA','TARDE') and (curr_date != prev_date or curr_turno != prev_turno):
+                turno_icon = 'MAÑANA ☀️' if curr_turno == 'MAÑANA' else 'TARDE 🌙'
+                if curr_date != prev_date:
+                    ws.merge_range(r, 0, r, 15, f"{sep_text} — {turno_icon}", fmt_sep)
+                else:
+                    ws.merge_range(r, 0, r, 15, f"        {turno_icon}", fmt_sep)
+                r += 1
+            prev_date = curr_date; prev_turno = curr_turno
+
         key = (row['color_bg'], row['color_font'])
         if key not in fmt_cache:
             fmt_cache[key] = {
@@ -1274,6 +1294,7 @@ def exportar_excel():
         ws.write(r, 13, row.get('actividad_app', ''), fl)
         ws.write(r, 14, row.get('asistencia', ''), fc)
         ws.write(r, 15, 'SIHCE' if row['sihce'] else '', fc)
+        r += 1
 
     wb.close(); output.seek(0)
     filename = f"Agenda_{MESES_ES[month]}_{year}.xlsx"

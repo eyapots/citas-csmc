@@ -27,7 +27,7 @@ import xlsxwriter
 # ==============================================================================
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
-DB_PATH = os.path.join('/tmp', 'citas.db')
+DB_PATH = os.path.join('/data', 'citas.db') if os.path.isdir('/data') else os.path.join('/tmp', 'citas.db')
 
 PROF_PALETTE = {
     "HUAPAYA ESPINOZA GIRALDO WILFREDO":    {'bg': '#203764', 'font': 'white'},
@@ -733,6 +733,7 @@ def profesionales():
         esp_psic = 'selected' if p['especialidad'] == 'PSICOLOGÍA' else ''
         esp_med = 'selected' if p['especialidad'] == 'MEDICINA' else ''
         esp_psiq = 'selected' if p['especialidad'] == 'PSIQUIATRÍA' else ''
+        esp_to = 'selected' if p['especialidad'] == 'TERAPIA OCUPACIONAL' else ''
         font_b = 'selected' if p['color_font'] == 'black' else ''
         font_w = 'selected' if p['color_font'] == 'white' else ''
         rows += f'''<tr class="{inactive}">
@@ -746,7 +747,7 @@ def profesionales():
             <td colspan="5">
                 <form method="POST" action="/profesional/editar/{p['id']}" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;padding:.5rem">
                     <div class="form-group" style="flex:2;margin:0"><label>Nombre</label><input type="text" name="nombre" value="{p['nombre']}" class="form-input" required></div>
-                    <div class="form-group" style="flex:1;margin:0"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA" {esp_psic}>PSICOLOGÍA</option><option value="MEDICINA" {esp_med}>MEDICINA</option><option value="PSIQUIATRÍA" {esp_psiq}>PSIQUIATRÍA</option></select></div>
+                    <div class="form-group" style="flex:1;margin:0"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA" {esp_psic}>PSICOLOGÍA</option><option value="MEDICINA" {esp_med}>MEDICINA</option><option value="PSIQUIATRÍA" {esp_psiq}>PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL" {esp_to}>TERAPIA OCUPACIONAL</option></select></div>
                     <div class="form-group" style="margin:0"><label>Color</label><input type="color" name="color_bg" value="{p['color_bg']}" class="form-color"></div>
                     <div class="form-group" style="margin:0"><label>Texto</label><select name="color_font" class="form-select"><option value="black" {font_b}>Negro</option><option value="white" {font_w}>Blanco</option></select></div>
                     <button type="submit" class="btn btn-sm btn-success">💾 Guardar</button>
@@ -758,7 +759,7 @@ def profesionales():
     <form method="POST" action="/profesional/nuevo">
         <div class="form-row">
             <div class="form-group" style="flex:2"><label>Nombre completo</label><input type="text" name="nombre" class="form-input" required placeholder="APELLIDO APELLIDO NOMBRE NOMBRE"></div>
-            <div class="form-group"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option></select></div>
+            <div class="form-group"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option></select></div>
             <div class="form-group"><label>Color fondo</label><input type="color" name="color_bg" value="#CCCCCC" class="form-color"></div>
             <div class="form-group"><label>Color texto</label><select name="color_font" class="form-select"><option value="black">Negro</option><option value="white">Blanco</option></select></div>
         </div>

@@ -454,17 +454,8 @@ def generate_slots(conn, year, month, roster_text=None):
     return count
 
 def get_default_roster():
-    return """HUAPAYA ESPINOZA GIRALDO WILFREDO: Día 9 MT, día 10 MT, día 11 MT, día 12 MT, día 23 MT, día 24 MT, día 25 MT, día 26 MT.
-SALAS MORALES GONZALO AUGUSTO: Día 2 T, día 3 T, día 4 MT, día 5 M, día 6 MT, día 7 M, día 12 T, día 13 MT, día 14 M, día 16 T, día 17 M, día 18 MT, día 19 T, día 20 M, día 23 T, día 24 T, día 25 M, día 26 MT, día 27 M, día 28 M.
-EQUIÑO CHAVEZ IRENE EXMENA: Día 16 GD, día 17 M, día 18 T, día 19 T, día 20 GD, día 25 GD, día 26 T, día 27 M, día 28 GD.
-SEQQUERA HUAMANI YENY VIKI: Día 2 MT, día 3 M, día 4 M, día 5 MT, día 6 M, día 9 M, día 10 T, día 11 M, día 12 T, día 13 MT, día 16 M, día 18 M, día 19 MT, día 20 M, día 21 MT, día 23 M, día 24 M, día 25 T, día 26 M, día 27 M.
-RODRIGUEZ CONTRERAS ROSSANA CRISTINA: Día 4 MT, día 5 T, día 6 T, día 7 M, día 9 T, día 10 MT, día 11 T, día 12 M, día 13 T, día 14 MT, día 18 T, día 19 M, día 20 MT, día 21 M, día 23 MT, día 24 T, día 25 T, día 26 M, día 27 M, día 28 M.
-CHOQUE AVILES ANA LUZ: Día 3 T, día 4 M, día 5 T, día 6 M, día 7 GD, día 9 M, día 10 T, día 11 M, día 12 T, día 13 GD, día 16 GD, día 17 T, día 18 GD, día 19 T, día 20 M, día 23 M, día 24 T, día 25 GD, día 26 T, día 27 M.
-HUAMANI AÑAMURO MERYLIN NATALY: Día 2 MT, día 3 M, día 4 T, día 5 M, día 6 MT, día 9 T, día 10 M, día 11 T, día 12 M, día 13 M, día 17 M, día 18 M, día 19 M, día 20 T, día 21 MT, día 23 T, día 24 MT, día 25 M, día 26 MT, día 27 M.
-GALLEGOS PORTUGAL FELIX ABEL: Día 2 GD, día 3 M, día 4 M, día 5 M, día 6 M, día 7 GD, día 9 M, día 10 M, día 11 T, día 12 M, día 13 GD, día 16 M, día 17 M, día 18 M, día 19 GD, día 23 M, día 24 M, día 25 M, día 26 GD, día 27 M.
-SUCA TINTA YUDITH DIANA: Día 3 T, día 4 MT, día 5 T, día 6 M, día 9 M, día 10 T, día 11 M, día 12 T, día 13 MT, día 14 MT, día 16 T, día 17 T, día 18 M, día 19 T, día 20 M, día 23 MT, día 25 T, día 26 MT, día 27 M, día 28 T.
-GARCIA PERALTA NARVY ZORAIDA: Día 2 T, día 3 MT, día 4 T, día 5 M, día 9 MT, día 10 M, día 11 MT, día 12 M, día 16 M, día 17 M, día 18 T, día 19 M, día 20 T, día 21 MT, día 23 T, día 24 T, día 25 M, día 26 T, día 27 MT, día 28 M.
-COLQUEHUANCA PUMA LUZ MARY: Día 2 MT, día 3 MT, día 4 MT, día 5 MT, día 6 MT, día 9 MT, día 10 MT, día 11 MT, día 12 MT, día 13 MT, día 16 MT, día 17 MT, día 18 MT, día 19 MT, día 20 MT, día 23 MT, día 24 MT, día 25 MT, día 26 MT, día 27 MT."""
+    return ""
+
 
 # ==============================================================================
 # RUTAS
@@ -550,14 +541,10 @@ def agenda():
     prof_id = request.args.get('prof_id', '')
     fecha = request.args.get('fecha', '')
     profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
-
-    # Build prof options - LIMPIO sin colores de fondo
     prof_options = '<option value="">— Seleccionar profesional —</option>'
     for p in profesionales:
         sel = 'selected' if str(p['id']) == str(prof_id) else ''
         prof_options += f'<option value="{p["id"]}" {sel}>{p["nombre"]} ({p["especialidad"]})</option>'
-
-    # Build citas table
     citas_html = ''
     if prof_id and fecha:
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.color_bg, p.color_font
@@ -565,7 +552,6 @@ def agenda():
             WHERE c.profesional_id=? AND c.fecha=? ORDER BY
             CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END,
             c.hora_inicio""", (prof_id, fecha)).fetchall()
-
         if citas:
             try:
                 dt = datetime.strptime(fecha, '%Y-%m-%d')
@@ -573,197 +559,123 @@ def agenda():
             except: fecha_info = fecha
             total = len([c for c in citas if c['turno'] != 'ADMINISTRATIVA'])
             ocupados = sum(1 for c in citas if c['estado'] == 'Confirmado')
-            prof_info = citas[0]
-            citas_html += f'''<div class="date-banner">
-                <span class="prof-chip" style="background:{prof_info['color_bg']};color:{prof_info['color_font']}">{prof_info['prof_nombre']}</span>
-                <strong>{fecha_info}</strong>
-                <span class="badge badge-info">{total} cupos</span>
-                <span class="badge badge-success">{total-ocupados} disponibles</span>
-                <span class="badge badge-danger">{ocupados} ocupados</span></div>'''
-
-            citas_html += '''<div class="table-wrapper"><table class="citas-table"><thead><tr>
-                <th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>SIHCE</th><th>Estado</th><th>Asistencia</th><th>Acciones</th>
-                </tr></thead><tbody>'''
-            current_turno = ''
+            pi = citas[0]
+            citas_html += f'<div class="date-banner"><span class="prof-chip" style="background:{pi["color_bg"]};color:{pi["color_font"]}">{pi["prof_nombre"]}</span><strong>{fecha_info}</strong><span class="badge badge-info">{total} cupos</span><span class="badge badge-success">{total-ocupados} disponibles</span><span class="badge badge-danger">{ocupados} ocupados</span></div>'
+            citas_html += '<div class="table-wrapper"><table class="citas-table"><thead><tr><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>SIHCE</th><th>Estado</th><th>Asistencia</th><th>Acciones</th></tr></thead><tbody>'
+            ct = ''
             for c in citas:
-                if c['turno'] != current_turno:
-                    current_turno = c['turno']
-                    if c['turno'] == 'MAÑANA': icon = '☀️'
-                    elif c['turno'] == 'TARDE': icon = '🌙'
-                    else: icon = '📋'
-                    citas_html += f'<tr class="turno-divider"><td colspan="9"><span class="turno-label">{icon} {c["turno"]}</span></td></tr>'
-
+                if c['turno'] != ct:
+                    ct = c['turno']
+                    icon = '☀️' if ct == 'MAÑANA' else ('🌙' if ct == 'TARDE' else '📋')
+                    citas_html += f'<tr class="turno-divider"><td colspan="9"><span class="turno-label">{icon} {ct}</span></td></tr>'
                 if c['turno'] == 'ADMINISTRATIVA':
-                    citas_html += f'''<tr class="cita-row" style="background:#fff3e0;border-left:4px solid #ff9800">
-                        <td>ADM</td><td class="td-hora"><strong>{c['hora_inicio']} - {c['hora_fin']}</strong></td>
-                        <td colspan="7"><em style="color:#e65100">📋 Hora Administrativa</em></td></tr>'''
+                    citas_html += f'<tr class="cita-row" style="background:#fff3e0;border-left:4px solid #ff9800"><td>ADM</td><td class="td-hora"><strong>{c["hora_inicio"]} - {c["hora_fin"]}</strong></td><td colspan="7"><em style="color:#e65100">📋 Hora Administrativa</em></td></tr>'
                     continue
-
-                row_class = 'row-ocupado' if c['estado'] == 'Confirmado' else 'row-disponible'
-                style = f'border-left:4px solid {c["color_bg"]};' if c['estado'] == 'Confirmado' else ''
-
+                rc = 'row-ocupado' if c['estado'] == 'Confirmado' else 'row-disponible'
+                st = f'border-left:4px solid {c["color_bg"]};' if c['estado'] == 'Confirmado' else ''
                 if c['estado'] == 'Confirmado':
-                    pac_cell = f'<span class="paciente-nombre">{c["paciente"]}</span>'
-                    if c['edad']: pac_cell += f' <small>({c["edad"]} años)</small>'
-                    if c['celular']: pac_cell += f'<br><small class="text-muted">📱 {c["celular"]}</small>'
-                    if c['actividad_app']: pac_cell += f'<br><small style="color:#e65100;font-weight:600">🏷️ APP: {c["actividad_app"]}</small>'
-                    if c['observaciones']: pac_cell += f'<br><small class="text-muted">📝 {c["observaciones"]}</small>'
-                else:
-                    pac_cell = '<span class="text-available">Disponible</span>'
-
-                tipo_html = ''
+                    pc = f'<span class="paciente-nombre">{c["paciente"]}</span>'
+                    if c['edad']: pc += f' <small>({c["edad"]} años)</small>'
+                    if c['celular']: pc += f'<br><small class="text-muted">📱 {c["celular"]}</small>'
+                    if c['actividad_app']: pc += f'<br><small style="color:#e65100;font-weight:600">🏷️ APP: {c["actividad_app"]}</small>'
+                    if c['observaciones']: pc += f'<br><small class="text-muted">📝 {c["observaciones"]}</small>'
+                else: pc = '<span class="text-available">Disponible</span>'
+                th = ''
                 if c['tipo_paciente']:
-                    badge_class = 'badge-new' if c['tipo_paciente'] == 'NUEVO' else 'badge-cont'
-                    tipo_html = f'<span class="badge {badge_class}">{c["tipo_paciente"]}</span>'
-
-                sihce_html = ''
+                    bc = 'badge-new' if c['tipo_paciente'] == 'NUEVO' else 'badge-cont'
+                    th = f'<span class="badge {bc}">{c["tipo_paciente"]}</span>'
+                sh = ''
                 if c['estado'] == 'Confirmado':
-                    sihce_val = c['sihce'] if c['sihce'] else 0
-                    if sihce_val:
-                        sihce_html = '<span class="sihce-tag">SIHCE</span>'
-                    sihce_html += f' <button class="btn-asist" onclick="toggleSihce({c["id"]},{1 if not sihce_val else 0})" title="Marcar/Quitar SIHCE">🔗</button>'
-
-                status_class = 'status-confirmado' if c['estado'] == 'Confirmado' else 'status-disponible'
-                status_html = f'<span class="status-dot {status_class}"></span>{c["estado"]}'
-
-                asist_html = ''
+                    sv = c['sihce'] if c['sihce'] else 0
+                    if sv: sh = '<span class="sihce-tag">SIHCE</span>'
+                    sh += f' <button class="btn-asist" onclick="toggleSihce({c["id"]},{1 if not sv else 0})" title="SIHCE">🔗</button>'
+                sc = 'status-confirmado' if c['estado'] == 'Confirmado' else 'status-disponible'
+                sthtml = f'<span class="status-dot {sc}"></span>{c["estado"]}'
+                ah = ''
                 if c['estado'] == 'Confirmado':
-                    a_active = 'btn-asist-active' if c['asistencia'] == 'Asistió' else ''
-                    n_active = 'btn-asist-no-active' if c['asistencia'] == 'No asistió' else ''
-                    asist_html = f'''<div class="asistencia-btns">
-                        <button class="btn-asist {a_active}" onclick="marcarAsistencia({c['id']},'Asistió')" title="Asistió">✅</button>
-                        <button class="btn-asist {n_active}" onclick="marcarAsistencia({c['id']},'No asistió')" title="No asistió">❌</button></div>'''
-
+                    aa = 'btn-asist-active' if c['asistencia'] == 'Asistió' else ''
+                    na = 'btn-asist-no-active' if c['asistencia'] == 'No asistió' else ''
+                    ah = f'<div class="asistencia-btns"><button class="btn-asist {aa}" onclick="marcarAsistencia({c["id"]},\'Asistió\')" title="Asistió">✅</button><button class="btn-asist {na}" onclick="marcarAsistencia({c["id"]},\'No asistió\')" title="No asistió">❌</button></div>'
                 if c['estado'] == 'Disponible':
-                    action = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{c["hora_inicio"]} - {c["hora_fin"]}\')">➕ Agendar</button>'
+                    he = c["hora_inicio"] + " - " + c["hora_fin"]
+                    act = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{he}\')">➕ Agendar</button>'
                 else:
-                    pac_escaped = c["paciente"].replace("'", "\\'")
-                    action = f'<form method="POST" action="/cita/eliminar/{c["id"]}" onsubmit="return confirm(\'¿Eliminar cita de {pac_escaped}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
-
-                citas_html += f'''<tr class="cita-row {row_class}" style="{style}">
-                    <td>{c['turno'][:3]}</td>
-                    <td class="td-hora"><strong>{c['hora_inicio']} - {c['hora_fin']}</strong></td>
-                    <td>{pac_cell}</td><td>{c['dni'] if c['estado']=='Confirmado' else ''}</td>
-                    <td>{tipo_html}</td><td>{sihce_html}</td><td>{status_html}</td><td>{asist_html}</td><td>{action}</td></tr>'''
-
+                    pe = c["paciente"].replace("'","\\'")
+                    act = f'<form method="POST" action="/cita/eliminar/{c["id"]}" onsubmit="return confirm(\'¿Eliminar cita de {pe}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
+                citas_html += f'<tr class="cita-row {rc}" style="{st}"><td>{c["turno"][:3]}</td><td class="td-hora"><strong>{c["hora_inicio"]} - {c["hora_fin"]}</strong></td><td>{pc}</td><td>{c["dni"] if c["estado"]=="Confirmado" else ""}</td><td>{th}</td><td>{sh}</td><td>{sthtml}</td><td>{ah}</td><td>{act}</td></tr>'
             citas_html += '</tbody></table></div>'
-        else:
-            citas_html = '<div class="empty-state"><p>No hay cupos para esta combinación.</p></div>'
+        else: citas_html = '<div class="empty-state"><p>No hay cupos para esta combinación.</p></div>'
     elif not prof_id:
         citas_html = '<div class="empty-state"><div class="empty-icon">📋</div><h3>Seleccione un profesional para ver su agenda</h3><p>Use los filtros de arriba para comenzar</p></div>'
-
     conn.close()
-
+    CALENDAR_JS = ('<script>'
+        'function onProfChange(v){'
+        'if(!v){document.getElementById("cal-container").innerHTML="";return}'
+        'fetch("/api/fechas/"+v).then(r=>r.json()).then(d=>renderCalendar(d)).catch(e=>console.error(e))}'
+        'function renderCalendar(fechas){'
+        'let c=document.getElementById("cal-container");'
+        'if(!fechas.length){c.innerHTML="<p style=\\"padding:.5rem;color:#6b7280\\">Sin fechas programadas</p>";return}'
+        'let months={};'
+        'fechas.forEach(f=>{let k=f.year+"-"+f.month;if(!months[k])months[k]={year:f.year,month:f.month,dates:{}};months[k].dates[f.day]={turno:f.turno,value:f.value}});'
+        'let meses=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];'
+        'let dias=["L","M","X","J","V","S","D"];'
+        'let html="";let selF=document.getElementById("sel-fecha").value;'
+        'Object.values(months).forEach(m=>{'
+        'html+="<div style=\\"margin-bottom:.5rem\\"><strong style=\\"font-size:.85rem\\">"+meses[m.month]+" "+m.year+"</strong>";'
+        'html+="<div class=\\"cal-grid\\">";'
+        'dias.forEach(d=>html+="<div class=\\"cal-header\\">"+d+"</div>");'
+        'let fd=new Date(m.year,m.month-1,1).getDay();fd=fd===0?6:fd-1;'
+        'for(let i=0;i<fd;i++)html+="<div class=\\"cal-day empty\\"></div>";'
+        'let dm=new Date(m.year,m.month,0).getDate();'
+        'for(let d=1;d<=dm;d++){'
+        'let info=m.dates[d];'
+        'if(info){'
+        'let cls="turno-"+info.turno.toLowerCase();'
+        'let sel=info.value===selF?" selected":"";'
+        'html+="<div class=\\"cal-day "+cls+sel+"\\" onclick=\\"selectDate(\\x27"+info.value+"\\x27)\\" title=\\""+info.turno+"\\">"+d+"</div>"'
+        '}else{'
+        'html+="<div class=\\"cal-day empty\\" style=\\"color:#ccc;cursor:default\\">"+d+"</div>"'
+        '}}'
+        'html+="</div>";'
+        'html+="<div class=\\"cal-legend\\"><span><span class=\\"cal-legend-dot\\" style=\\"background:#1565c0\\"></span> MT/GD</span><span><span class=\\"cal-legend-dot\\" style=\\"background:#ff8f00\\"></span> M</span><span><span class=\\"cal-legend-dot\\" style=\\"background:#2e7d32\\"></span> T</span></div>";'
+        'html+="</div>"});c.innerHTML=html}'
+        'function selectDate(f){let p=document.getElementById("sel-prof").value;if(p&&f)window.location.href="/?prof_id="+p+"&fecha="+f}'
+        'function openModal(id,h){document.getElementById("modal-cita-id").value=id;document.getElementById("modal-hora").textContent=h;document.getElementById("modal-agendar").style.display="flex"}'
+        'function closeModal(){document.getElementById("modal-agendar").style.display="none"}'
+        'function marcarAsistencia(id,e){fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(e),{method:"POST"}).then(()=>location.reload())}'
+        'function toggleSihce(id,v){fetch("/cita/sihce/"+id+"/"+v,{method:"POST"}).then(()=>location.reload())}'
+        'document.getElementById("modal-agendar")?.addEventListener("click",function(e){if(e.target===this)closeModal()});'
+        '</script>')
+    init_js = f'<script>onProfChange("{prof_id}");</script>' if prof_id else ''
+    modal_html = '''<div id="modal-agendar" class="modal" style="display:none"><div class="modal-content">
+        <div class="modal-header"><h3>➕ Agendar Cita</h3><button class="modal-close" onclick="closeModal()">×</button></div>
+        <form method="POST" action="/cita/agendar"><input type="hidden" name="cita_id" id="modal-cita-id">
+        <div class="modal-body"><p id="modal-hora" class="modal-hora-display"></p>
+        <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" required class="form-input" placeholder="Nombre completo"></div>
+        <div class="form-row"><div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
+        <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
+        <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div></div>
+        <div class="form-row"><div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
+        <div class="form-group"><label>SIHCE</label><select name="sihce" class="form-select"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div></div>
+        <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label><select name="actividad_app" class="form-select">
+        <option value="">— No aplica —</option><option value="VISITA DOMICILIARIA">Visita domiciliaria</option><option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
+        <option value="GAM ADULTO">GAM adulto</option><option value="GAM NIÑO">GAM niño</option><option value="GAM ADICCIONES">GAM adicciones</option>
+        <option value="CHARLA RADIAL">Charla radial</option><option value="CHARLA EN COMUNIDAD">Charla en comunidad</option>
+        <option value="REALIZACIÓN DE INFORMES">Realización de Informes</option><option value="REUNIÓN DE PERSONAL">Reunión de personal</option>
+        <option value="REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA">Reunión Protocolo de Actuación Conjunta</option>
+        <option value="REUNIÓN ASOCIACIÓN FAMILIARES">Reunión de la asociación de familiares</option>
+        <option value="REUNIÓN TÉCNICA COMITÉ SALUD MENTAL">Reunión Técnica Comité de Salud Mental</option></select></div>
+        <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" placeholder="Opcional"></div></div>
+        <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn btn-success">💾 Agendar</button></div></form></div></div>'''
     content = f'''<div class="page-header"><h2>📅 Agenda de Citas</h2></div>
-    <div class="card" style="padding:1rem">
-        <div class="filter-row">
-            <div class="filter-group"><label>Profesional</label>
-                <select id="sel-prof" class="form-select" onchange="onProfChange(this.value)">{prof_options}</select></div>
-            <div class="filter-group"><label>Fecha</label>
-                <div id="cal-container"></div>
-                <input type="hidden" id="sel-fecha" value="{fecha}">
-            </div>
-        </div>
-    </div>
-    {citas_html}
-    <div id="modal-agendar" class="modal" style="display:none">
-        <div class="modal-content">
-            <div class="modal-header"><h3>➕ Agendar Cita</h3><button class="modal-close" onclick="closeModal()">×</button></div>
-            <form method="POST" action="/cita/agendar">
-                <input type="hidden" name="cita_id" id="modal-cita-id">
-                <div class="modal-body">
-                    <p id="modal-hora" class="modal-hora-display"></p>
-                    <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" required class="form-input" placeholder="Nombre completo"></div>
-                    <div class="form-row">
-                        <div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
-                        <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
-                        <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Tipo de paciente</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
-                        <div class="form-group"><label>SIHCE (atención conjunta)</label><select name="sihce" class="form-select"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div>
-                    </div>
-                    <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label>
-                        <select name="actividad_app" class="form-select">
-                            <option value="">— No aplica —</option>
-                            <option value="VISITA DOMICILIARIA">Visita domiciliaria</option>
-                            <option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
-                            <option value="GAM ADULTO">GAM adulto</option>
-                            <option value="GAM NIÑO">GAM niño</option>
-                            <option value="GAM ADICCIONES">GAM adicciones</option>
-                            <option value="CHARLA RADIAL">Charla radial</option>
-                            <option value="CHARLA EN COMUNIDAD">Charla en comunidad</option>
-                            <option value="REALIZACIÓN DE INFORMES">Realización de Informes</option>
-                            <option value="REUNIÓN DE PERSONAL">Reunión de personal</option>
-                            <option value="REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA">Reunión Protocolo de Actuación Conjunta</option>
-                            <option value="REUNIÓN ASOCIACIÓN FAMILIARES">Reunión de la asociación de familiares</option>
-                            <option value="REUNIÓN TÉCNICA COMITÉ SALUD MENTAL">Reunión Técnica Comité de Salud Mental</option>
-                        </select>
-                    </div>
-                    <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" placeholder="Opcional"></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-success">💾 Agendar</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    <script>
-    let fechasData=[];
-    function onProfChange(v){{
-        if(!v){{document.getElementById('cal-container').innerHTML='';return}}
-        fetch('/api/fechas/'+v).then(r=>r.json()).then(d=>{{
-            fechasData=d;
-            renderCalendar(d);
-        }})
-    }};
-    function renderCalendar(fechas){{
-        let container=document.getElementById('cal-container');
-        if(!fechas.length){{container.innerHTML='<p class="text-muted" style="padding:.5rem">Sin fechas programadas</p>';return}}
-        let months={{}};
-        fechas.forEach(f=>{{let k=f.year+'-'+f.month;if(!months[k])months[k]={{year:f.year,month:f.month,dates:{{}}}};months[k].dates[f.day]={{turno:f.turno,value:f.value}}}});
-        let meses=['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-        let dias=['L','M','M','J','V','S','D'];
-        let html='';
-        let selFecha=document.getElementById('sel-fecha').value;
-        Object.values(months).forEach(m=>{{
-            html+='<div style="margin-bottom:.5rem"><strong style="font-size:.82rem">'+meses[m.month]+' '+m.year+'</strong>';
-            html+='<div class="cal-grid">';
-            dias.forEach(d=>html+='<div class="cal-header">'+d+'</div>');
-            let firstDay=new Date(m.year,m.month-1,1).getDay();
-            firstDay=firstDay===0?6:firstDay-1;
-            for(let i=0;i<firstDay;i++)html+='<div class="cal-day empty"></div>';
-            let daysInMonth=new Date(m.year,m.month,0).getDate();
-            for(let d=1;d<=daysInMonth;d++){{
-                let info=m.dates[d];
-                if(info){{
-                    let cls='turno-'+info.turno.toLowerCase();
-                    let sel=info.value===selFecha?' selected':'';
-                    html+='<div class="cal-day '+cls+sel+'" onclick="selectDate(\''+info.value+'\')" title="'+info.turno+'">'+d+'</div>';
-                }}else{{
-                    html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
-                }}
-            }}
-            html+='</div>';
-            html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> Mañana</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> Tarde</span></div>';
-            html+='</div>';
-        }});
-        container.innerHTML=html;
-    }};
-    function selectDate(fecha){{
-        let p=document.getElementById('sel-prof').value;
-        if(p&&fecha)window.location.href='/?prof_id='+p+'&fecha='+fecha;
-    }};
-    function openModal(id,hora){{document.getElementById('modal-cita-id').value=id;document.getElementById('modal-hora').textContent='🕐 '+hora;document.getElementById('modal-agendar').style.display='flex'}};
-    function closeModal(){{document.getElementById('modal-agendar').style.display='none'}};
-    function marcarAsistencia(id,estado){{fetch('/cita/asistencia/'+id+'/'+encodeURIComponent(estado),{{method:'POST'}}).then(()=>location.reload())}};
-    function toggleSihce(id,val){{fetch('/cita/sihce/'+id+'/'+val,{{method:'POST'}}).then(()=>location.reload())}};
-    document.getElementById('modal-agendar')?.addEventListener('click',function(e){{if(e.target===this)closeModal()}});
-    // Auto-load if prof_id is set
-    let initProf=document.getElementById('sel-prof').value;
-    if(initProf)onProfChange(initProf);
-    </script>'''
+    <div class="card" style="padding:1rem"><div class="filter-row">
+        <div class="filter-group"><label>Profesional</label><select id="sel-prof" class="form-select" onchange="onProfChange(this.value)">{prof_options}</select></div>
+        <div class="filter-group"><label>Fecha</label><div id="cal-container"></div><input type="hidden" id="sel-fecha" value="{fecha}"></div>
+    </div></div>{citas_html}{modal_html}''' + CALENDAR_JS + init_js
+    flash_msgs = session.pop('_flashes', [])
+    return page('Agenda - Sistema de Citas', content, flash_msgs)
+
 
     flash_msgs = session.pop('_flashes', [])
     return page('Agenda - Sistema de Citas', content, flash_msgs)

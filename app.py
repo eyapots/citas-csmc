@@ -46,6 +46,8 @@ PROF_PALETTE = {
 SPECIALTY_MAP = {
     "PSIQUIATRÍA": ["HUAPAYA ESPINOZA GIRALDO WILFREDO"],
     "MEDICINA":    ["SALAS MORALES GONZALO AUGUSTO"],
+    "TERAPIA DE LENGUAJE": ["CHOQUE AVILES ANA LUZ", "HUAMANI AÑAMURO MERYLIN NATALY"],
+    "TERAPIA OCUPACIONAL": ["COLQUEHUANCA PUMA LUZ MARY"],
 }
 
 DIAS_ES = ['LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO']
@@ -285,6 +287,7 @@ def init_db():
             actividad_app TEXT DEFAULT '',
             asistencia TEXT DEFAULT 'Pendiente',
             sihce INTEGER DEFAULT 0,
+            sihce_prof_id INTEGER DEFAULT 0,
             creado_por INTEGER,
             modificado_por INTEGER,
             creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -318,6 +321,11 @@ def init_db():
         conn.execute("SELECT actividad_app FROM citas LIMIT 1")
     except:
         conn.execute("ALTER TABLE citas ADD COLUMN actividad_app TEXT DEFAULT ''")
+    # Add sihce_prof_id column if missing
+    try:
+        conn.execute("SELECT sihce_prof_id FROM citas LIMIT 1")
+    except:
+        conn.execute("ALTER TABLE citas ADD COLUMN sihce_prof_id INTEGER DEFAULT 0")
     admin = conn.execute("SELECT id FROM usuarios WHERE username='admin'").fetchone()
     if not admin:
         conn.execute("INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (?,?,?,?)",
@@ -409,11 +417,22 @@ def generate_slots(conn, year, month, roster_text=None):
             if not prof_data: continue
             shift = schedule[day]
             is_med = prof_data['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA')
+            is_to = prof_data['especialidad'] == 'TERAPIA OCUPACIONAL'
             date_str = curr_date.strftime('%Y-%m-%d')
             conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
                 (prof_data['id'], year, month, day, shift))
             slots_to_create = []
-            if is_med:
+            if is_to:
+                # TERAPIA OCUPACIONAL: 45 min, M sin hora admin pero con 1 paciente en tarde
+                if shift in ('M',):
+                    slots_to_create.extend(_make_slots("07:30", 7, 45, 'MAÑANA'))
+                    slots_to_create.append({'inicio': '13:50', 'fin': '14:35', 'turno': 'TARDE'})
+                elif shift in ('T',):
+                    slots_to_create.extend(_make_slots("13:30", 6, 45, 'TARDE'))
+                elif shift in ('MT', 'GD'):
+                    slots_to_create.extend(_make_slots("07:30", 7, 45, 'MAÑANA'))
+                    slots_to_create.extend(_make_slots("13:45", 6, 45, 'TARDE'))
+            elif is_med:
                 # MÉDICO/PSIQUIATRA: 40 min por cita
                 if shift in ('M',):
                     # Solo mañana: 7 citas + 1 hora administrativa
@@ -442,13 +461,13 @@ def generate_slots(conn, year, month, roster_text=None):
             prev_appointments = existing.get((prof_data['nombre'], date_str), [])
             prev_by_order = sorted(prev_appointments, key=lambda x: x['hora_inicio'])
             for i, slot in enumerate(slots_to_create):
-                pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'; tipo=''; app_act=''; asist='Pendiente'; sihce=0
+                pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'; tipo=''; app_act=''; asist='Pendiente'; sihce=0; sihce_pid=0
                 if i < len(prev_by_order):
                     prev = prev_by_order[i]; pac=prev['paciente']; dni=prev['dni']; cel=prev['celular']
                     obs=prev['observaciones']; estado=prev['estado']; tipo=prev['tipo_paciente']; asist=prev['asistencia']
-                    sihce = prev.get('sihce', 0); edad = prev.get('edad', ''); app_act = prev.get('actividad_app', '')
-                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,asistencia,sihce) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce))
+                    sihce = prev.get('sihce', 0); sihce_pid = prev.get('sihce_prof_id', 0); edad = prev.get('edad', ''); app_act = prev.get('actividad_app', '')
+                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,asistencia,sihce,sihce_prof_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce, sihce_pid))
                 count += 1
     conn.commit()
     return count
@@ -497,6 +516,15 @@ def logout():
 # ==============================================================================
 # API: FECHAS CON CALENDARIO VISUAL
 # ==============================================================================
+@app.route('/api/sihce_profs')
+@login_required
+def api_sihce_profs():
+    """Return medical professionals for SIHCE pairing"""
+    conn = get_db()
+    profs = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 AND especialidad IN ('MEDICINA','PSIQUIATRÍA') ORDER BY orden").fetchall()
+    conn.close()
+    return jsonify([{'id': p['id'], 'nombre': p['nombre'], 'especialidad': p['especialidad']} for p in profs])
+
 @app.route('/api/fechas/<int:prof_id>')
 @login_required
 def api_fechas(prof_id):
@@ -587,7 +615,12 @@ def agenda():
                 sh = ''
                 if c['estado'] == 'Confirmado':
                     sv = c['sihce'] if c['sihce'] else 0
-                    if sv: sh = '<span class="sihce-tag">SIHCE</span>'
+                    if sv:
+                        sh = '<span class="sihce-tag">SIHCE</span>'
+                        sp_id = c.get('sihce_prof_id', 0) or 0
+                        if sp_id:
+                            sp = conn.execute("SELECT nombre FROM profesionales WHERE id=?", (sp_id,)).fetchone()
+                            if sp: sh += f'<br><small style="color:#e65100">🔗 {sp["nombre"]}</small>'
                     sh += f' <button class="btn-asist" onclick="toggleSihce({c["id"]},{1 if not sv else 0})" title="SIHCE">🔗</button>'
                 sc = 'status-confirmado' if c['estado'] == 'Confirmado' else 'status-disponible'
                 sthtml = f'<span class="status-dot {sc}"></span>{c["estado"]}'
@@ -643,7 +676,8 @@ def agenda():
         'function openModal(id,h){document.getElementById("modal-cita-id").value=id;document.getElementById("modal-hora").textContent=h;document.getElementById("modal-agendar").style.display="flex"}'
         'function closeModal(){document.getElementById("modal-agendar").style.display="none"}'
         'function marcarAsistencia(id,e){fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(e),{method:"POST"}).then(()=>location.reload())}'
-        'function toggleSihce(id,v){fetch("/cita/sihce/"+id+"/"+v,{method:"POST"}).then(()=>location.reload())}'
+        'function toggleSihce(id,v){fetch("/cita/sihce/"+id+"/"+v,{method:"POST"}).then(()=>location.reload())}function toggleSihceProf(v){var d=document.getElementById("sihce-prof-div");if(v==="1"){d.style.display="block";fetch("/api/sihce_profs").then(r=>r.json()).then(ps=>{var s=document.getElementById("sihce-prof-sel");s.innerHTML="<option value=\"0\">-- Seleccionar --</option>";ps.forEach(p=>{s.innerHTML+="<option value=\""+p.id+"\">"+p.nombre+" ("+p.esp+")</option>"})})}else{d.style.display="none"}}'
+        'function toggleSihceProf(v){var d=document.getElementById("sihce-prof-div");if(v==="1"){d.style.display="block";fetch("/api/sihce_profs").then(r=>r.json()).then(profs=>{var s=document.getElementById("sihce-prof-sel");s.innerHTML="<option value=\\"0\\">— Seleccionar —</option>";profs.forEach(p=>{s.innerHTML+="<option value=\\""+p.id+"\\">"+p.nombre+" ("+p.especialidad+")</option>"})})}else{d.style.display="none"}}'
         'document.getElementById("modal-agendar")?.addEventListener("click",function(e){if(e.target===this)closeModal()});'
         '</script>')
     init_js = f'<script>onProfChange("{prof_id}");</script>' if prof_id else ''
@@ -656,7 +690,8 @@ def agenda():
         <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div></div>
         <div class="form-row"><div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
-        <div class="form-group"><label>SIHCE</label><select name="sihce" class="form-select"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div></div>
+        <div class="form-group"><label>SIHCE</label><select name="sihce" id="sihce-sel" class="form-select" onchange="toggleSihceProf(this.value)"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div></div>
+        <div id="sihce-prof-div" class="form-group" style="display:none;background:#fff3e0;padding:.75rem;border-radius:6px;border:2px solid #ff6f00"><label style="color:#e65100">🔗 Médico/Psiquiatra para atención conjunta SIHCE</label><select name="sihce_prof_id" id="sihce-prof-sel" class="form-select"><option value="0">— Seleccionar —</option></select></div>
         <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label><select name="actividad_app" class="form-select">
         <option value="">— No aplica —</option><option value="VISITA DOMICILIARIA">Visita domiciliaria</option><option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
         <option value="GAM ADULTO">GAM adulto</option><option value="GAM NIÑO">GAM niño</option><option value="GAM ADICCIONES">GAM adicciones</option>
@@ -694,6 +729,7 @@ def agendar_cita():
     obs = request.form.get('observaciones', '').strip()
     tipo = request.form.get('tipo_paciente', 'NUEVO')
     sihce = int(request.form.get('sihce', 0))
+    sihce_prof_id = int(request.form.get('sihce_prof_id', 0))
     actividad_app = request.form.get('actividad_app', '').strip()
     if not paciente:
         flash('El nombre del paciente es obligatorio', 'danger')
@@ -704,8 +740,8 @@ def agendar_cita():
         flash('Cupo no disponible', 'warning')
         conn.close()
         return redirect(request.referrer or '/')
-    conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, actividad_app=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
-        (paciente, dni, edad, celular, obs, tipo, sihce, actividad_app, session['user_id'], session['user_id'], cita_id))
+    conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, sihce_prof_id=?, actividad_app=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        (paciente, dni, edad, celular, obs, tipo, sihce, sihce_prof_id, actividad_app, session['user_id'], session['user_id'], cita_id))
     conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
         (cita_id, session['user_id'], 'AGENDAR', f'Paciente: {paciente} | DNI: {dni}'))
     conn.commit(); conn.close()
@@ -718,7 +754,7 @@ def eliminar_cita(cita_id):
     conn = get_db()
     cita = conn.execute("SELECT * FROM citas WHERE id=?", (cita_id,)).fetchone()
     if cita and cita['estado'] != 'Disponible':
-        conn.execute("UPDATE citas SET paciente='',dni='',edad='',celular='',observaciones='',estado='Disponible',tipo_paciente='',actividad_app='',asistencia='Pendiente',sihce=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        conn.execute("UPDATE citas SET paciente='',dni='',edad='',celular='',observaciones='',estado='Disponible',tipo_paciente='',actividad_app='',asistencia='Pendiente',sihce=0,sihce_prof_id=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
             (session['user_id'], cita_id))
         conn.execute("INSERT INTO historial (cita_id,usuario_id,accion,detalle) VALUES (?,?,?,?)",
             (cita_id, session['user_id'], 'ELIMINAR', f'Eliminado: {cita["paciente"]}'))
@@ -758,7 +794,6 @@ def reporte_diario():
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE c.fecha=? AND c.estado='Confirmado'
         ORDER BY p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
-    conn.close()
 
     try:
         dt = datetime.strptime(fecha, '%Y-%m-%d')
@@ -775,7 +810,13 @@ def reporte_diario():
             rows += f'''<tr style="background:{c['color_bg']};color:{c['color_font']}">
                 <td colspan="7" style="padding:.6rem;font-weight:700">{c['prof_nombre']} — {c['especialidad']}</td></tr>'''
         num += 1
-        sihce_tag = ' <span class="sihce-tag">SIHCE</span>' if c['sihce'] else ''
+        sihce_tag = ''
+        if c['sihce']:
+            sihce_tag = ' <span class="sihce-tag">SIHCE</span>'
+            sp_id = c.get('sihce_prof_id', 0) or 0
+            if sp_id:
+                sp = conn.execute("SELECT nombre FROM profesionales WHERE id=?", (sp_id,)).fetchone()
+                if sp: sihce_tag += f' <small style="color:#e65100">🔗 {sp["nombre"]}</small>'
         app_tag = f'<br><small style="color:#e65100">APP: {c["actividad_app"]}</small>' if c['actividad_app'] else ''
         rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
             <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
@@ -783,6 +824,7 @@ def reporte_diario():
             <td><span class="badge {'badge-new' if c['tipo_paciente']=='NUEVO' else 'badge-cont'}">{c['tipo_paciente']}</span></td>
             <td>{c['observaciones']}</td></tr>'''
 
+    conn.close()
     if not citas:
         rows = '<tr><td colspan="8" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
 
@@ -1124,7 +1166,7 @@ def exportar_excel():
     conn = get_db()
     rows = conn.execute("""SELECT c.fecha, c.turno, c.area, p.nombre as profesional,
         c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.edad, c.celular, c.observaciones, c.estado,
-        c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, p.color_bg, p.color_font
+        c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, c.sihce_prof_id, p.color_bg, p.color_font
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
         ORDER BY c.fecha, p.orden, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, c.hora_inicio""",
@@ -1138,14 +1180,14 @@ def exportar_excel():
     fmt_title = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter'})
 
     # Title
-    ws.merge_range(0, 0, 0, 14, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
+    ws.merge_range(0, 0, 0, 15, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
 
-    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'SIHCE']
+    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'ASISTENCIA', 'SIHCE']
     for i, h in enumerate(headers): ws.write(2, i, h, fmt_h)
     ws.set_column(0, 0, 12); ws.set_column(1, 1, 10); ws.set_column(2, 2, 12); ws.set_column(3, 3, 14)
     ws.set_column(4, 4, 35); ws.set_column(5, 5, 15); ws.set_column(6, 6, 35); ws.set_column(7, 7, 10)
     ws.set_column(8, 8, 6); ws.set_column(9, 9, 12); ws.set_column(10, 10, 25); ws.set_column(11, 12, 14)
-    ws.set_column(13, 13, 30); ws.set_column(14, 14, 8)
+    ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8)
 
     fmt_cache = {}
     for i, row in enumerate(rows):
@@ -1172,7 +1214,8 @@ def exportar_excel():
         ws.write(r, 9, row['celular'], fc); ws.write(r, 10, row['observaciones'], fl)
         ws.write(r, 11, row['estado'], fc); ws.write(r, 12, row['tipo_paciente'], fc)
         ws.write(r, 13, row.get('actividad_app', ''), fl)
-        ws.write(r, 14, 'SIHCE' if row['sihce'] else '', fc)
+        ws.write(r, 14, row.get('asistencia', ''), fc)
+        ws.write(r, 15, 'SIHCE' if row['sihce'] else '', fc)
 
     wb.close(); output.seek(0)
     filename = f"Agenda_{MESES_ES[month]}_{year}.xlsx"

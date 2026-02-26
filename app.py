@@ -181,7 +181,7 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 @media print{.navbar,.btn,.no-print{display:none!important}.container{padding:0}.card{box-shadow:none;border:1px solid #ccc}}
 """
 
-ESPECIALIDADES_OPTIONS = '<option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option>'
+ESPECIALIDADES_OPTIONS = '<option value="PSICOLOGÍA">PSICOLOGÍA</option><option value="MEDICINA">MEDICINA</option><option value="PSIQUIATRÍA">PSIQUIATRÍA</option><option value="TERAPIA OCUPACIONAL">TERAPIA OCUPACIONAL</option><option value="TERAPIA DE LENGUAJE">TERAPIA DE LENGUAJE</option>'
 
 # ==============================================================================
 # HTML HELPERS
@@ -511,15 +511,26 @@ def logout():
 def api_fechas(prof_id):
     conn = get_db()
     rows = conn.execute("SELECT DISTINCT fecha FROM citas WHERE profesional_id=? ORDER BY fecha", (prof_id,)).fetchall()
-    # Also get turno info per date
+    # Get turno info per date from roles_mensuales
     turno_map = {}
     turno_rows = conn.execute("SELECT r.dia, r.turno, r.mes, r.anio FROM roles_mensuales r WHERE r.profesional_id=?", (prof_id,)).fetchall()
     for tr in turno_rows:
         key = f"{tr['anio']}-{tr['mes']:02d}-{tr['dia']:02d}"
         turno_map[key] = tr['turno']
+    # Fallback: deduce turno from citas if not in roles_mensuales
+    for r in rows:
+        if r['fecha'] not in turno_map:
+            turnos = conn.execute("SELECT DISTINCT turno FROM citas WHERE profesional_id=? AND fecha=? AND turno!='ADMINISTRATIVA'", (prof_id, r['fecha'])).fetchall()
+            t_list = [t['turno'] for t in turnos]
+            if 'MAÑANA' in t_list and 'TARDE' in t_list:
+                turno_map[r['fecha']] = 'MT'
+            elif 'MAÑANA' in t_list:
+                turno_map[r['fecha']] = 'M'
+            elif 'TARDE' in t_list:
+                turno_map[r['fecha']] = 'T'
     fechas = []
     for r in rows:
-        turno = turno_map.get(r['fecha'], '')
+        turno = turno_map.get(r['fecha'], 'M')
         try:
             dt = datetime.strptime(r['fecha'], '%Y-%m-%d')
             dia_sem = DIAS_CORTO[dt.weekday()]
@@ -936,7 +947,7 @@ def profesionales():
         btn_text = '⏸️' if p['activo'] else '▶️'
         btn_class = 'btn-warning' if p['activo'] else 'btn-success'
         esp_opts = ''
-        for esp in ['PSICOLOGÍA', 'MEDICINA', 'PSIQUIATRÍA', 'TERAPIA OCUPACIONAL']:
+        for esp in ['PSICOLOGÍA', 'MEDICINA', 'PSIQUIATRÍA', 'TERAPIA OCUPACIONAL', 'TERAPIA DE LENGUAJE']:
             sel = 'selected' if p['especialidad'] == esp else ''
             esp_opts += f'<option value="{esp}" {sel}>{esp}</option>'
         font_b = 'selected' if p['color_font'] == 'black' else ''

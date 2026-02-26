@@ -516,6 +516,102 @@ def logout():
 # ==============================================================================
 # API: FECHAS CON CALENDARIO VISUAL
 # ==============================================================================
+@app.route('/static/app.js')
+def serve_app_js():
+    js = """
+function onProfChange(v){
+    if(!v){document.getElementById("cal-container").innerHTML="";return}
+    fetch("/api/fechas/"+v)
+        .then(function(r){return r.json()})
+        .then(function(d){renderCalendar(d)})
+        .catch(function(e){console.error("Error:",e)});
+}
+
+function renderCalendar(fechas){
+    var c=document.getElementById("cal-container");
+    if(!fechas.length){c.innerHTML='<p style="padding:.5rem;color:#6b7280">Sin fechas programadas</p>';return}
+    var months={};
+    fechas.forEach(function(f){
+        var k=f.year+"-"+f.month;
+        if(!months[k])months[k]={year:f.year,month:f.month,dates:{}};
+        months[k].dates[f.day]={turno:f.turno,value:f.value};
+    });
+    var meses=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+    var dias=["L","M","X","J","V","S","D"];
+    var html="";
+    var selF=document.getElementById("sel-fecha").value;
+    Object.values(months).forEach(function(m){
+        html+='<div style="margin-bottom:.5rem"><strong style="font-size:.85rem">'+meses[m.month]+' '+m.year+'</strong>';
+        html+='<div class="cal-grid">';
+        dias.forEach(function(d){html+='<div class="cal-header">'+d+'</div>'});
+        var fd=new Date(m.year,m.month-1,1).getDay();
+        fd=fd===0?6:fd-1;
+        for(var i=0;i<fd;i++)html+='<div class="cal-day empty"></div>';
+        var dm=new Date(m.year,m.month,0).getDate();
+        for(var d=1;d<=dm;d++){
+            var info=m.dates[d];
+            if(info){
+                var cls="turno-"+info.turno.toLowerCase();
+                var sel=info.value===selF?" selected":"";
+                html+='<div class="cal-day '+cls+sel+'" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+'">'+d+'</div>';
+            }else{
+                html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
+            }
+        }
+        html+='</div>';
+        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span></div>';
+        html+='</div>';
+    });
+    c.innerHTML=html;
+}
+
+function selectDate(f){
+    var p=document.getElementById("sel-prof").value;
+    if(p&&f)window.location.href="/?prof_id="+p+"&fecha="+f;
+}
+
+function openModal(id,h){
+    document.getElementById("modal-cita-id").value=id;
+    document.getElementById("modal-hora").textContent=h;
+    document.getElementById("modal-agendar").style.display="flex";
+}
+
+function closeModal(){
+    document.getElementById("modal-agendar").style.display="none";
+}
+
+function marcarAsistencia(id,e){
+    fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(e),{method:"POST"}).then(function(){location.reload()});
+}
+
+function toggleSihce(id,v){
+    fetch("/cita/sihce/"+id+"/"+v,{method:"POST"}).then(function(){location.reload()});
+}
+
+function toggleSihceProf(v){
+    var d=document.getElementById("sihce-prof-div");
+    if(v==="1"){
+        d.style.display="block";
+        fetch("/api/sihce_profs").then(function(r){return r.json()}).then(function(ps){
+            var s=document.getElementById("sihce-prof-sel");
+            s.innerHTML='<option value="0">-- Seleccionar --</option>';
+            ps.forEach(function(p){
+                s.innerHTML+='<option value="'+p.id+'">'+p.nombre+' ('+p.esp+')</option>';
+            });
+        });
+    }else{
+        d.style.display="none";
+    }
+}
+
+var modalEl=document.getElementById("modal-agendar");
+if(modalEl)modalEl.addEventListener("click",function(e){if(e.target===this)closeModal()});
+"""
+    resp = make_response(js)
+    resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
 @app.route('/api/sihce_profs')
 @login_required
 def api_sihce_profs():
@@ -641,45 +737,7 @@ def agenda():
     elif not prof_id:
         citas_html = '<div class="empty-state"><div class="empty-icon">📋</div><h3>Seleccione un profesional para ver su agenda</h3><p>Use los filtros de arriba para comenzar</p></div>'
     conn.close()
-    CALENDAR_JS = ('<script>'
-        'function onProfChange(v){'
-        'if(!v){document.getElementById("cal-container").innerHTML="";return}'
-        'fetch("/api/fechas/"+v).then(r=>r.json()).then(d=>renderCalendar(d)).catch(e=>console.error(e))}'
-        'function renderCalendar(fechas){'
-        'let c=document.getElementById("cal-container");'
-        'if(!fechas.length){c.innerHTML="<p style=\\"padding:.5rem;color:#6b7280\\">Sin fechas programadas</p>";return}'
-        'let months={};'
-        'fechas.forEach(f=>{let k=f.year+"-"+f.month;if(!months[k])months[k]={year:f.year,month:f.month,dates:{}};months[k].dates[f.day]={turno:f.turno,value:f.value}});'
-        'let meses=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];'
-        'let dias=["L","M","X","J","V","S","D"];'
-        'let html="";let selF=document.getElementById("sel-fecha").value;'
-        'Object.values(months).forEach(m=>{'
-        'html+="<div style=\\"margin-bottom:.5rem\\"><strong style=\\"font-size:.85rem\\">"+meses[m.month]+" "+m.year+"</strong>";'
-        'html+="<div class=\\"cal-grid\\">";'
-        'dias.forEach(d=>html+="<div class=\\"cal-header\\">"+d+"</div>");'
-        'let fd=new Date(m.year,m.month-1,1).getDay();fd=fd===0?6:fd-1;'
-        'for(let i=0;i<fd;i++)html+="<div class=\\"cal-day empty\\"></div>";'
-        'let dm=new Date(m.year,m.month,0).getDate();'
-        'for(let d=1;d<=dm;d++){'
-        'let info=m.dates[d];'
-        'if(info){'
-        'let cls="turno-"+info.turno.toLowerCase();'
-        'let sel=info.value===selF?" selected":"";'
-        'html+="<div class=\\"cal-day "+cls+sel+"\\" onclick=\\"selectDate(\\x27"+info.value+"\\x27)\\" title=\\""+info.turno+"\\">"+d+"</div>"'
-        '}else{'
-        'html+="<div class=\\"cal-day empty\\" style=\\"color:#ccc;cursor:default\\">"+d+"</div>"'
-        '}}'
-        'html+="</div>";'
-        'html+="<div class=\\"cal-legend\\"><span><span class=\\"cal-legend-dot\\" style=\\"background:#1565c0\\"></span> MT/GD</span><span><span class=\\"cal-legend-dot\\" style=\\"background:#ff8f00\\"></span> M</span><span><span class=\\"cal-legend-dot\\" style=\\"background:#2e7d32\\"></span> T</span></div>";'
-        'html+="</div>"});c.innerHTML=html}'
-        'function selectDate(f){let p=document.getElementById("sel-prof").value;if(p&&f)window.location.href="/?prof_id="+p+"&fecha="+f}'
-        'function openModal(id,h){document.getElementById("modal-cita-id").value=id;document.getElementById("modal-hora").textContent=h;document.getElementById("modal-agendar").style.display="flex"}'
-        'function closeModal(){document.getElementById("modal-agendar").style.display="none"}'
-        'function marcarAsistencia(id,e){fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(e),{method:"POST"}).then(()=>location.reload())}'
-        'function toggleSihce(id,v){fetch("/cita/sihce/"+id+"/"+v,{method:"POST"}).then(()=>location.reload())}function toggleSihceProf(v){var d=document.getElementById("sihce-prof-div");if(v==="1"){d.style.display="block";fetch("/api/sihce_profs").then(r=>r.json()).then(ps=>{var s=document.getElementById("sihce-prof-sel");s.innerHTML="<option value=\"0\">-- Seleccionar --</option>";ps.forEach(p=>{s.innerHTML+="<option value=\""+p.id+"\">"+p.nombre+" ("+p.esp+")</option>"})})}else{d.style.display="none"}}'
-        'function toggleSihceProf(v){var d=document.getElementById("sihce-prof-div");if(v==="1"){d.style.display="block";fetch("/api/sihce_profs").then(r=>r.json()).then(profs=>{var s=document.getElementById("sihce-prof-sel");s.innerHTML="<option value=\\"0\\">— Seleccionar —</option>";profs.forEach(p=>{s.innerHTML+="<option value=\\""+p.id+"\\">"+p.nombre+" ("+p.especialidad+")</option>"})})}else{d.style.display="none"}}'
-        'document.getElementById("modal-agendar")?.addEventListener("click",function(e){if(e.target===this)closeModal()});'
-        '</script>')
+    CALENDAR_JS = '<script src="/static/app.js"></script>'
     init_js = f'<script>onProfChange("{prof_id}");</script>' if prof_id else ''
     modal_html = '''<div id="modal-agendar" class="modal" style="display:none"><div class="modal-content">
         <div class="modal-header"><h3>➕ Agendar Cita</h3><button class="modal-close" onclick="closeModal()">×</button></div>

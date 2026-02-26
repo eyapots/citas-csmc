@@ -730,10 +730,28 @@ def profesionales():
         status_badge = f'<span class="badge badge-success">Activo</span>' if p['activo'] else '<span class="badge badge-danger">Inactivo</span>'
         btn_text = '⏸️ Desactivar' if p['activo'] else '▶️ Activar'
         btn_class = 'btn-warning' if p['activo'] else 'btn-success'
+        esp_psic = 'selected' if p['especialidad'] == 'PSICOLOGÍA' else ''
+        esp_med = 'selected' if p['especialidad'] == 'MEDICINA' else ''
+        esp_psiq = 'selected' if p['especialidad'] == 'PSIQUIATRÍA' else ''
+        font_b = 'selected' if p['color_font'] == 'black' else ''
+        font_w = 'selected' if p['color_font'] == 'white' else ''
         rows += f'''<tr class="{inactive}">
             <td><span class="color-swatch" style="background:{p['color_bg']};color:{p['color_font']}">Aa</span></td>
             <td><strong>{p['nombre']}</strong></td><td>{p['especialidad']}</td><td>{status_badge}</td>
-            <td><form method="POST" action="/profesional/toggle/{p['id']}" style="display:inline"><button type="submit" class="btn btn-sm {btn_class}">{btn_text}</button></form></td></tr>'''
+            <td style="white-space:nowrap">
+                <button class="btn btn-sm btn-primary" onclick="document.getElementById('edit-{p['id']}').style.display=document.getElementById('edit-{p['id']}').style.display==='none'?'table-row':'none'">✏️ Editar</button>
+                <form method="POST" action="/profesional/toggle/{p['id']}" style="display:inline"><button type="submit" class="btn btn-sm {btn_class}">{btn_text}</button></form>
+            </td></tr>
+            <tr id="edit-{p['id']}" style="display:none;background:#f0f9ff">
+            <td colspan="5">
+                <form method="POST" action="/profesional/editar/{p['id']}" style="display:flex;gap:.5rem;align-items:flex-end;flex-wrap:wrap;padding:.5rem">
+                    <div class="form-group" style="flex:2;margin:0"><label>Nombre</label><input type="text" name="nombre" value="{p['nombre']}" class="form-input" required></div>
+                    <div class="form-group" style="flex:1;margin:0"><label>Especialidad</label><select name="especialidad" class="form-select"><option value="PSICOLOGÍA" {esp_psic}>PSICOLOGÍA</option><option value="MEDICINA" {esp_med}>MEDICINA</option><option value="PSIQUIATRÍA" {esp_psiq}>PSIQUIATRÍA</option></select></div>
+                    <div class="form-group" style="margin:0"><label>Color</label><input type="color" name="color_bg" value="{p['color_bg']}" class="form-color"></div>
+                    <div class="form-group" style="margin:0"><label>Texto</label><select name="color_font" class="form-select"><option value="black" {font_b}>Negro</option><option value="white" {font_w}>Blanco</option></select></div>
+                    <button type="submit" class="btn btn-sm btn-success">💾 Guardar</button>
+                </form>
+            </td></tr>'''
 
     content = f'''<div class="page-header"><h2>👥 Gestión de Profesionales</h2></div>
     <div class="card"><h3>Agregar Profesional</h3>
@@ -783,6 +801,24 @@ def toggle_profesional(prof_id):
         conn.execute("UPDATE profesionales SET activo=? WHERE id=?", (0 if prof['activo'] else 1, prof_id))
         conn.commit()
     conn.close()
+    return redirect('/profesionales')
+
+@app.route('/profesional/editar/<int:prof_id>', methods=['POST'])
+@admin_required
+def editar_profesional(prof_id):
+    nombre = request.form.get('nombre', '').strip().upper()
+    esp = request.form.get('especialidad', 'PSICOLOGÍA')
+    color_bg = request.form.get('color_bg', '#CCCCCC')
+    color_font = request.form.get('color_font', 'black')
+    if not nombre:
+        flash('El nombre es obligatorio', 'danger')
+        return redirect('/profesionales')
+    conn = get_db()
+    conn.execute("UPDATE profesionales SET nombre=?, especialidad=?, color_bg=?, color_font=? WHERE id=?",
+        (nombre, esp, color_bg, color_font, prof_id))
+    conn.commit()
+    conn.close()
+    flash(f'Profesional actualizado: {nombre}', 'success')
     return redirect('/profesionales')
 
 @app.route('/usuarios')

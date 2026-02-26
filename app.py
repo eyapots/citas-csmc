@@ -277,10 +277,12 @@ def init_db():
             area TEXT NOT NULL,
             paciente TEXT DEFAULT '',
             dni TEXT DEFAULT '',
+            edad TEXT DEFAULT '',
             celular TEXT DEFAULT '',
             observaciones TEXT DEFAULT '',
             estado TEXT DEFAULT 'Disponible',
             tipo_paciente TEXT DEFAULT '',
+            actividad_app TEXT DEFAULT '',
             asistencia TEXT DEFAULT 'Pendiente',
             sihce INTEGER DEFAULT 0,
             creado_por INTEGER,
@@ -306,6 +308,16 @@ def init_db():
         conn.execute("SELECT sihce FROM citas LIMIT 1")
     except:
         conn.execute("ALTER TABLE citas ADD COLUMN sihce INTEGER DEFAULT 0")
+    # Add edad column if missing
+    try:
+        conn.execute("SELECT edad FROM citas LIMIT 1")
+    except:
+        conn.execute("ALTER TABLE citas ADD COLUMN edad TEXT DEFAULT ''")
+    # Add actividad_app column if missing
+    try:
+        conn.execute("SELECT actividad_app FROM citas LIMIT 1")
+    except:
+        conn.execute("ALTER TABLE citas ADD COLUMN actividad_app TEXT DEFAULT ''")
     admin = conn.execute("SELECT id FROM usuarios WHERE username='admin'").fetchone()
     if not admin:
         conn.execute("INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (?,?,?,?)",
@@ -430,13 +442,13 @@ def generate_slots(conn, year, month, roster_text=None):
             prev_appointments = existing.get((prof_data['nombre'], date_str), [])
             prev_by_order = sorted(prev_appointments, key=lambda x: x['hora_inicio'])
             for i, slot in enumerate(slots_to_create):
-                pac=''; dni=''; cel=''; obs=''; estado='Disponible'; tipo=''; asist='Pendiente'; sihce=0
+                pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'; tipo=''; app_act=''; asist='Pendiente'; sihce=0
                 if i < len(prev_by_order):
                     prev = prev_by_order[i]; pac=prev['paciente']; dni=prev['dni']; cel=prev['celular']
                     obs=prev['observaciones']; estado=prev['estado']; tipo=prev['tipo_paciente']; asist=prev['asistencia']
-                    sihce = prev.get('sihce', 0)
-                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,celular,observaciones,estado,tipo_paciente,asistencia,sihce) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, cel, obs, estado, tipo, asist, sihce))
+                    sihce = prev.get('sihce', 0); edad = prev.get('edad', ''); app_act = prev.get('actividad_app', '')
+                conn.execute("INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,asistencia,sihce) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (prof_data['id'], date_str, slot['inicio'], slot['fin'], slot['turno'], prof_data['especialidad'], pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce))
                 count += 1
     conn.commit()
     return count
@@ -581,7 +593,9 @@ def agenda():
 
                 if c['estado'] == 'Confirmado':
                     pac_cell = f'<span class="paciente-nombre">{c["paciente"]}</span>'
+                    if c['edad']: pac_cell += f' <small>({c["edad"]} años)</small>'
                     if c['celular']: pac_cell += f'<br><small class="text-muted">📱 {c["celular"]}</small>'
+                    if c['actividad_app']: pac_cell += f'<br><small style="color:#e65100;font-weight:600">🏷️ APP: {c["actividad_app"]}</small>'
                     if c['observaciones']: pac_cell += f'<br><small class="text-muted">📝 {c["observaciones"]}</small>'
                 else:
                     pac_cell = '<span class="text-available">Disponible</span>'
@@ -651,11 +665,29 @@ def agenda():
                     <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" required class="form-input" placeholder="Nombre completo"></div>
                     <div class="form-row">
                         <div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
+                        <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
                         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div>
                     </div>
                     <div class="form-row">
                         <div class="form-group"><label>Tipo de paciente</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
                         <div class="form-group"><label>SIHCE (atención conjunta)</label><select name="sihce" class="form-select"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div>
+                    </div>
+                    <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label>
+                        <select name="actividad_app" class="form-select">
+                            <option value="">— No aplica —</option>
+                            <option value="VISITA DOMICILIARIA">Visita domiciliaria</option>
+                            <option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
+                            <option value="GAM ADULTO">GAM adulto</option>
+                            <option value="GAM NIÑO">GAM niño</option>
+                            <option value="GAM ADICCIONES">GAM adicciones</option>
+                            <option value="CHARLA RADIAL">Charla radial</option>
+                            <option value="CHARLA EN COMUNIDAD">Charla en comunidad</option>
+                            <option value="REALIZACIÓN DE INFORMES">Realización de Informes</option>
+                            <option value="REUNIÓN DE PERSONAL">Reunión de personal</option>
+                            <option value="REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA">Reunión Protocolo de Actuación Conjunta</option>
+                            <option value="REUNIÓN ASOCIACIÓN FAMILIARES">Reunión de la asociación de familiares</option>
+                            <option value="REUNIÓN TÉCNICA COMITÉ SALUD MENTAL">Reunión Técnica Comité de Salud Mental</option>
+                        </select>
                     </div>
                     <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" placeholder="Opcional"></div>
                 </div>
@@ -734,10 +766,12 @@ def agendar_cita():
     cita_id = request.form.get('cita_id')
     paciente = request.form.get('paciente', '').strip().upper()
     dni = request.form.get('dni', '').strip()
+    edad = request.form.get('edad', '').strip()
     celular = request.form.get('celular', '').strip()
     obs = request.form.get('observaciones', '').strip()
     tipo = request.form.get('tipo_paciente', 'NUEVO')
     sihce = int(request.form.get('sihce', 0))
+    actividad_app = request.form.get('actividad_app', '').strip()
     if not paciente:
         flash('El nombre del paciente es obligatorio', 'danger')
         return redirect(request.referrer or '/')
@@ -747,8 +781,8 @@ def agendar_cita():
         flash('Cupo no disponible', 'warning')
         conn.close()
         return redirect(request.referrer or '/')
-    conn.execute("UPDATE citas SET paciente=?, dni=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
-        (paciente, dni, celular, obs, tipo, sihce, session['user_id'], session['user_id'], cita_id))
+    conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, actividad_app=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        (paciente, dni, edad, celular, obs, tipo, sihce, actividad_app, session['user_id'], session['user_id'], cita_id))
     conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
         (cita_id, session['user_id'], 'AGENDAR', f'Paciente: {paciente} | DNI: {dni}'))
     conn.commit(); conn.close()
@@ -761,7 +795,7 @@ def eliminar_cita(cita_id):
     conn = get_db()
     cita = conn.execute("SELECT * FROM citas WHERE id=?", (cita_id,)).fetchone()
     if cita and cita['estado'] != 'Disponible':
-        conn.execute("UPDATE citas SET paciente='',dni='',celular='',observaciones='',estado='Disponible',tipo_paciente='',asistencia='Pendiente',sihce=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+        conn.execute("UPDATE citas SET paciente='',dni='',edad='',celular='',observaciones='',estado='Disponible',tipo_paciente='',actividad_app='',asistencia='Pendiente',sihce=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?",
             (session['user_id'], cita_id))
         conn.execute("INSERT INTO historial (cita_id,usuario_id,accion,detalle) VALUES (?,?,?,?)",
             (cita_id, session['user_id'], 'ELIMINAR', f'Eliminado: {cita["paciente"]}'))
@@ -819,14 +853,15 @@ def reporte_diario():
                 <td colspan="7" style="padding:.6rem;font-weight:700">{c['prof_nombre']} — {c['especialidad']}</td></tr>'''
         num += 1
         sihce_tag = ' <span class="sihce-tag">SIHCE</span>' if c['sihce'] else ''
+        app_tag = f'<br><small style="color:#e65100">APP: {c["actividad_app"]}</small>' if c['actividad_app'] else ''
         rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
             <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
-            <td><strong>{c['paciente']}</strong>{sihce_tag}</td><td>{c['dni']}</td>
+            <td><strong>{c['paciente']}</strong>{sihce_tag}{app_tag}</td><td>{c['dni']}</td><td>{c['edad']}</td>
             <td><span class="badge {'badge-new' if c['tipo_paciente']=='NUEVO' else 'badge-cont'}">{c['tipo_paciente']}</span></td>
             <td>{c['observaciones']}</td></tr>'''
 
     if not citas:
-        rows = '<tr><td colspan="7" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
+        rows = '<tr><td colspan="8" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
 
     content = f'''<div class="page-header"><h2>📋 Reporte Diario - Pacientes Programados</h2>
         <p class="text-muted" style="font-size:.9rem">Para sacar historias clínicas</p></div>
@@ -840,7 +875,7 @@ def reporte_diario():
     <div class="card">
         <h3>📅 {fecha_display} — {len(citas)} pacientes programados</h3>
         <div class="table-wrapper"><table class="citas-table"><thead><tr>
-            <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>Observaciones</th>
+            <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Edad</th><th>Tipo</th><th>Observaciones</th>
         </tr></thead><tbody>{rows}</tbody></table></div>
     </div>'''
     flash_msgs = session.pop('_flashes', [])
@@ -1165,8 +1200,8 @@ def exportar_excel():
     month = int(request.args.get('month', datetime.now().month))
     conn = get_db()
     rows = conn.execute("""SELECT c.fecha, c.turno, c.area, p.nombre as profesional,
-        c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.celular, c.observaciones, c.estado,
-        c.tipo_paciente, c.asistencia, c.sihce, p.color_bg, p.color_font
+        c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.edad, c.celular, c.observaciones, c.estado,
+        c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, p.color_bg, p.color_font
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
         ORDER BY c.fecha, p.orden, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, c.hora_inicio""",
@@ -1180,13 +1215,14 @@ def exportar_excel():
     fmt_title = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center', 'valign': 'vcenter'})
 
     # Title
-    ws.merge_range(0, 0, 0, 12, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
+    ws.merge_range(0, 0, 0, 14, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
 
-    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'SIHCE']
+    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'SIHCE']
     for i, h in enumerate(headers): ws.write(2, i, h, fmt_h)
     ws.set_column(0, 0, 12); ws.set_column(1, 1, 10); ws.set_column(2, 2, 12); ws.set_column(3, 3, 14)
     ws.set_column(4, 4, 35); ws.set_column(5, 5, 15); ws.set_column(6, 6, 35); ws.set_column(7, 7, 10)
-    ws.set_column(8, 8, 12); ws.set_column(9, 9, 25); ws.set_column(10, 11, 14); ws.set_column(12, 12, 8)
+    ws.set_column(8, 8, 6); ws.set_column(9, 9, 12); ws.set_column(10, 10, 25); ws.set_column(11, 12, 14)
+    ws.set_column(13, 13, 30); ws.set_column(14, 14, 8)
 
     fmt_cache = {}
     for i, row in enumerate(rows):
@@ -1209,10 +1245,11 @@ def exportar_excel():
         ws.write(r, 0, fecha_vis, fc); ws.write(r, 1, dia_sem, fc); ws.write(r, 2, row['turno'], fc)
         ws.write(r, 3, row['area'], fc); ws.write(r, 4, row['profesional'], fb)
         ws.write(r, 5, hora, fc); ws.write(r, 6, row['paciente'], fl)
-        ws.write(r, 7, row['dni'], fc); ws.write(r, 8, row['celular'], fc)
-        ws.write(r, 9, row['observaciones'], fl); ws.write(r, 10, row['estado'], fc)
-        ws.write(r, 11, row['tipo_paciente'], fc)
-        ws.write(r, 12, 'SIHCE' if row['sihce'] else '', fc)
+        ws.write(r, 7, row['dni'], fc); ws.write(r, 8, row.get('edad', ''), fc)
+        ws.write(r, 9, row['celular'], fc); ws.write(r, 10, row['observaciones'], fl)
+        ws.write(r, 11, row['estado'], fc); ws.write(r, 12, row['tipo_paciente'], fc)
+        ws.write(r, 13, row.get('actividad_app', ''), fl)
+        ws.write(r, 14, 'SIHCE' if row['sihce'] else '', fc)
 
     wb.close(); output.seek(0)
     filename = f"Agenda_{MESES_ES[month]}_{year}.xlsx"

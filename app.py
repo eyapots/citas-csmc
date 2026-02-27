@@ -195,6 +195,7 @@ def navbar_html():
     admin_links = ''
     if is_admin:
         admin_links = '''
+        <a href="/cambiar_turno" class="nav-link">🔄 Cambiar Turno</a>
         <a href="/generar" class="nav-link">⚙️ Generar</a>
         <a href="/profesionales" class="nav-link">👥 Profesionales</a>
         <a href="/usuarios" class="nav-link">🔑 Usuarios</a>
@@ -736,6 +737,7 @@ def agenda():
         else: citas_html = '<div class="empty-state"><p>No hay cupos para esta combinación.</p></div>'
     elif not prof_id:
         citas_html = '<div class="empty-state"><div class="empty-icon">📋</div><h3>Seleccione un profesional para ver su agenda</h3><p>Use los filtros de arriba para comenzar</p></div>'
+    is_lector = session.get('user_rol') == 'lector'
     conn.close()
     CALENDAR_JS = '<script src="/static/app.js"></script>'
     init_js = f'<script>onProfChange("{prof_id}");</script>' if prof_id else ''
@@ -779,6 +781,9 @@ def agenda():
 @app.route('/cita/agendar', methods=['POST'])
 @login_required
 def agendar_cita():
+    if session.get('user_rol')=='lector':
+        flash('No tiene permisos (solo lectura)','danger')
+        return redirect(request.referrer or '/')
     cita_id = request.form.get('cita_id')
     paciente = request.form.get('paciente', '').strip().upper()
     dni = request.form.get('dni', '').strip()
@@ -809,6 +814,9 @@ def agendar_cita():
 @app.route('/cita/eliminar/<int:cita_id>', methods=['POST'])
 @login_required
 def eliminar_cita(cita_id):
+    if session.get('user_rol')=='lector':
+        flash('No tiene permisos (solo lectura)','danger')
+        return redirect(request.referrer or '/')
     conn = get_db()
     cita = conn.execute("SELECT * FROM citas WHERE id=?", (cita_id,)).fetchone()
     if cita and cita['estado'] != 'Disponible':
@@ -824,6 +832,7 @@ def eliminar_cita(cita_id):
 @app.route('/cita/asistencia/<int:cita_id>/<estado>', methods=['POST'])
 @login_required
 def marcar_asistencia(cita_id, estado):
+    if session.get('user_rol')=='lector': return jsonify({'error':'Sin permisos'}),403
     if estado not in ('Asistió', 'No asistió', 'Pendiente'): abort(400)
     conn = get_db()
     conn.execute("UPDATE citas SET asistencia=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?", (estado, session['user_id'], cita_id))
@@ -835,6 +844,7 @@ def marcar_asistencia(cita_id, estado):
 @app.route('/cita/sihce/<int:cita_id>/<int:val>', methods=['POST'])
 @login_required
 def toggle_sihce(cita_id, val):
+    if session.get('user_rol')=='lector': return jsonify({'error':'Sin permisos'}),403
     conn = get_db()
     conn.execute("UPDATE citas SET sihce=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?", (val, session['user_id'], cita_id))
     conn.commit(); conn.close()
@@ -843,6 +853,200 @@ def toggle_sihce(cita_id, val):
 # ==============================================================================
 # REPORTE DIARIO - Pacientes programados por día
 # ==============================================================================
+@app.route('/cambiar_turno', methods=['GET', 'POST'])
+@admin_required
+def cambiar_turno():
+    conn = get_db()
+    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
+
+    resultado = ''
+    if request.method == 'POST':
+        prof_id = int(request.form.get('prof_id', 0))
+        fecha = request.form.get('fecha', '')
+        nuevo_turno = request.form.get('nuevo_turno', '')
+
+        if not prof_id or not fecha or not nuevo_turno:
+            flash('Complete todos los campos', 'danger')
+            conn.close()
+            return redirect('/cambiar_turno')
+
+        prof = conn.execute("SELECT * FROM profesionales WHERE id=?", (prof_id,)).fetchone()
+        if not prof:
+            flash('Profesional no encontrado', 'danger')
+            conn.close()
+            return redirect('/cambiar_turno')
+
+        # Get existing appointments for this professional on this date
+        citas_existentes = conn.execute(
+            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? ORDER BY hora_inicio",
+            (prof_id, fecha)).fetchall()
+
+        # Separate: patients with data vs empty slots
+        pacientes = [dict(c) for c in citas_existentes if c['estado'] == 'Confirmado']
+        total_prev = len(citas_existentes)
+
+        # Generate new slots for the new shift
+        is_med = prof['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA', 'SIHCE')
+        is_to = prof['especialidad'] == 'TERAPIA OCUPACIONAL'
+
+        new_slots = []
+        if is_to:
+            if nuevo_turno == 'M':
+                new_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
+                new_slots.append({'inicio': '13:50', 'fin': '14:35', 'turno': 'TARDE'})
+            elif nuevo_turno == 'T':
+                new_slots = _make_slots("13:30", 6, 45, 'TARDE')
+            elif nuevo_turno in ('MT', 'GD'):
+                new_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
+                new_slots.extend(_make_slots("13:45", 6, 45, 'TARDE'))
+        elif is_med:
+            if nuevo_turno == 'M':
+                new_slots = _make_slots("07:30", 7, 40, 'MAÑANA')
+                new_slots.append({'inicio': '12:10', 'fin': '13:00', 'turno': 'ADMINISTRATIVA'})
+            elif nuevo_turno == 'T':
+                new_slots = _make_slots("13:30", 6, 40, 'TARDE')
+            elif nuevo_turno in ('MT', 'GD'):
+                new_slots = _make_slots("07:30", 8, 40, 'MAÑANA')
+                new_slots.extend(_make_slots("14:00", 7, 40, 'TARDE'))
+        else:
+            if nuevo_turno == 'M':
+                new_slots = _make_slots("07:30", 6, 45, 'MAÑANA')
+                new_slots.append({'inicio': '12:00', 'fin': '13:00', 'turno': 'ADMINISTRATIVA'})
+            elif nuevo_turno == 'T':
+                new_slots = _make_slots("13:30", 6, 45, 'TARDE')
+            elif nuevo_turno in ('MT', 'GD'):
+                new_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
+                new_slots.extend(_make_slots("13:45", 6, 45, 'TARDE'))
+
+        # Count available patient slots (exclude ADMINISTRATIVA)
+        patient_slots = [s for s in new_slots if s['turno'] != 'ADMINISTRATIVA']
+        slots_disponibles = len(patient_slots)
+        pacientes_sin_cupo = []
+
+        if len(pacientes) > slots_disponibles:
+            pacientes_sin_cupo = pacientes[slots_disponibles:]
+            pacientes = pacientes[:slots_disponibles]
+
+        # Confirmation step
+        confirmar = request.form.get('confirmar', '')
+        if not confirmar:
+            # Show preview
+            try:
+                dt = datetime.strptime(fecha, '%Y-%m-%d')
+                fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+            except:
+                fecha_display = fecha
+
+            turno_prev = ''
+            if citas_existentes:
+                turnos = set(c['turno'] for c in citas_existentes if c['turno'] != 'ADMINISTRATIVA')
+                turno_prev = ', '.join(turnos)
+
+            pac_rows = ''
+            for i, p in enumerate(pacientes):
+                dest = patient_slots[i] if i < len(patient_slots) else None
+                if dest:
+                    pac_rows += f'<tr><td>{p["paciente"]}</td><td>{p["hora_inicio"]}-{p["hora_fin"]}</td><td style="color:green;font-weight:700">{dest["inicio"]}-{dest["fin"]} ({dest["turno"]})</td></tr>'
+
+            warning = ''
+            if pacientes_sin_cupo:
+                warning = f'<div class="flash flash-danger" style="margin:1rem 0">⚠️ <strong>{len(pacientes_sin_cupo)} paciente(s) NO CABEN</strong> en el nuevo turno:<br>'
+                for p in pacientes_sin_cupo:
+                    warning += f'• {p["paciente"]} ({p["hora_inicio"]}-{p["hora_fin"]})<br>'
+                warning += 'Estos pacientes se perderán si continúa.</div>'
+
+            resultado = f'''<div class="card" style="border:2px solid #ff8f00">
+                <h3>📋 Vista previa del cambio</h3>
+                <p><strong>Profesional:</strong> {prof["nombre"]}</p>
+                <p><strong>Fecha:</strong> {fecha_display}</p>
+                <p><strong>Turno actual:</strong> {turno_prev or "Sin turno"} ({total_prev} cupos)</p>
+                <p><strong>Nuevo turno:</strong> {nuevo_turno} ({len(new_slots)} cupos, {slots_disponibles} para pacientes)</p>
+                <p><strong>Pacientes agendados:</strong> {len(pacientes) + len(pacientes_sin_cupo)}</p>
+                {warning}
+                {"<div class='table-wrapper'><table class='citas-table'><thead><tr><th>Paciente</th><th>Horario actual</th><th>Nuevo horario</th></tr></thead><tbody>" + pac_rows + "</tbody></table></div>" if pac_rows else "<p>No hay pacientes agendados para esta fecha.</p>"}
+                <form method="POST" style="margin-top:1rem">
+                    <input type="hidden" name="prof_id" value="{prof_id}">
+                    <input type="hidden" name="fecha" value="{fecha}">
+                    <input type="hidden" name="nuevo_turno" value="{nuevo_turno}">
+                    <input type="hidden" name="confirmar" value="1">
+                    <button type="submit" class="btn btn-warning btn-lg" onclick="return confirm('¿Confirmar cambio de turno?')">✅ Confirmar Cambio de Turno</button>
+                    <a href="/cambiar_turno" class="btn btn-secondary btn-lg">❌ Cancelar</a>
+                </form>
+            </div>'''
+        else:
+            # Execute the change
+            # Delete all existing slots for this date/professional
+            conn.execute("DELETE FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha))
+
+            # Update roles_mensuales
+            try:
+                dt = datetime.strptime(fecha, '%Y-%m-%d')
+                conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
+                    (prof_id, dt.year, dt.month, dt.day, nuevo_turno))
+            except: pass
+
+            # Insert new slots
+            pac_idx = 0
+            for slot in new_slots:
+                pac = ''; dni = ''; edad = ''; cel = ''; obs = ''; estado = 'Disponible'
+                tipo = ''; app_act = ''; asist = 'Pendiente'; sihce = 0; sihce_pid = 0; creado = None; modif = None
+
+                if slot['turno'] != 'ADMINISTRATIVA' and pac_idx < len(pacientes):
+                    p = pacientes[pac_idx]
+                    pac = p['paciente']; dni = p['dni']; edad = p.get('edad', '')
+                    cel = p['celular']; obs = p['observaciones']; estado = 'Confirmado'
+                    tipo = p['tipo_paciente']; app_act = p.get('actividad_app', '')
+                    asist = p.get('asistencia', 'Pendiente')
+                    sihce = p.get('sihce', 0); sihce_pid = p.get('sihce_prof_id', 0)
+                    creado = p.get('creado_por'); modif = p.get('modificado_por')
+                    pac_idx += 1
+
+                conn.execute("""INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,
+                    paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,
+                    asistencia,sihce,sihce_prof_id,creado_por,modificado_por,modificado_en)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+                    (prof_id, fecha, slot['inicio'], slot['fin'], slot['turno'], prof['especialidad'],
+                     pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce, sihce_pid, creado, modif))
+
+            conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+                (0, session['user_id'], 'CAMBIO_TURNO', f'{prof["nombre"]} | {fecha} | Nuevo: {nuevo_turno} | {len(pacientes)} pacientes trasladados'))
+            conn.commit()
+
+            perdidos_msg = f' | {len(pacientes_sin_cupo)} paciente(s) no cupieron' if pacientes_sin_cupo else ''
+            flash(f'Turno cambiado: {prof["nombre"]} → {nuevo_turno} en {fecha}. {len(pacientes)} pacientes trasladados.{perdidos_msg}', 'success')
+            conn.close()
+            return redirect('/cambiar_turno')
+
+    conn.close()
+
+    prof_options = ''.join(f'<option value="{p["id"]}">{p["nombre"]} ({p["especialidad"]})</option>' for p in profesionales)
+    content = f'''<div class="page-header"><h2>🔄 Cambiar Turno de Profesional</h2></div>
+    <div class="card"><h3>Seleccionar cambio</h3>
+    <form method="POST">
+        <div class="form-row">
+            <div class="form-group"><label>Profesional</label>
+                <select name="prof_id" class="form-select" required><option value="">— Seleccionar —</option>{prof_options}</select>
+            </div>
+            <div class="form-group"><label>Fecha</label>
+                <input type="date" name="fecha" class="form-input" required>
+            </div>
+            <div class="form-group"><label>Nuevo Turno</label>
+                <select name="nuevo_turno" class="form-select" required>
+                    <option value="">— Seleccionar —</option>
+                    <option value="M">M - Solo Mañana</option>
+                    <option value="T">T - Solo Tarde</option>
+                    <option value="MT">MT - Mañana y Tarde</option>
+                    <option value="GD">GD - Guardia Diurna</option>
+                </select>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-warning btn-lg">🔍 Ver Vista Previa</button>
+    </form></div>
+    {resultado}'''
+
+    flash_msgs = session.pop('_flashes', [])
+    return page('Cambiar Turno - Sistema de Citas', content, flash_msgs)
+
 @app.route('/reporte_diario')
 @login_required
 def reporte_diario():
@@ -1061,7 +1265,7 @@ def usuarios():
     rows = ''
     for u in users:
         inactive = 'row-inactive' if not u['activo'] else ''
-        role_badge = '<span class="badge badge-admin">ADMIN</span>' if u['rol'] == 'admin' else '<span class="badge badge-info">OPERADOR</span>'
+        role_badge = '<span class="badge badge-admin">ADMIN</span>' if u['rol'] == 'admin' else ('<span class="badge badge-warning">LECTOR</span>' if u['rol'] == 'lector' else '<span class="badge badge-info">OPERADOR</span>')
         status_badge = '<span class="badge badge-success">Activo</span>' if u['activo'] else '<span class="badge badge-danger">Inactivo</span>'
         if u['id'] != session.get('user_id'):
             btn = '⏸️' if u['activo'] else '▶️'
@@ -1078,7 +1282,7 @@ def usuarios():
             <div class="form-group"><label>Usuario</label><input type="text" name="username" class="form-input" required placeholder="usuario"></div>
             <div class="form-group"><label>Contraseña</label><input type="password" name="password" class="form-input" required></div>
             <div class="form-group"><label>Nombre</label><input type="text" name="nombre" class="form-input" required placeholder="Nombre completo"></div>
-            <div class="form-group"><label>Rol</label><select name="rol" class="form-select"><option value="operador">Operador</option><option value="admin">Administrador</option></select></div>
+            <div class="form-group"><label>Rol</label><select name="rol" class="form-select"><option value="operador">Operador</option><option value="lector">Lector (solo lectura)</option><option value="admin">Administrador</option></select></div>
         </div>
         <button type="submit" class="btn btn-success">➕ Crear Usuario</button>
     </form></div>
@@ -1224,8 +1428,10 @@ def exportar_excel():
     conn = get_db()
     rows = conn.execute("""SELECT c.fecha, c.turno, c.area, p.nombre as profesional,
         c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.edad, c.celular, c.observaciones, c.estado,
-        c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, c.sihce_prof_id, p.color_bg, p.color_font
+        c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, c.sihce_prof_id, p.color_bg, p.color_font,
+        u.nombre as registrado_por
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        LEFT JOIN usuarios u ON u.id=c.creado_por
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
         ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, p.orden, c.hora_inicio""",
         (str(year), f"{month:02d}")).fetchall()
@@ -1239,14 +1445,14 @@ def exportar_excel():
     fmt_sep = wb.add_format({'bold': True, 'bg_color': '#f1f5f9', 'font_size': 11, 'border': 1, 'align': 'left', 'valign': 'vcenter'})
 
     # Title
-    ws.merge_range(0, 0, 0, 15, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
+    ws.merge_range(0, 0, 0, 16, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
 
-    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'ASISTENCIA', 'SIHCE']
+    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'ASISTENCIA', 'SIHCE', 'REGISTRADO POR']
     for i, h in enumerate(headers): ws.write(2, i, h, fmt_h)
     ws.set_column(0, 0, 12); ws.set_column(1, 1, 10); ws.set_column(2, 2, 12); ws.set_column(3, 3, 14)
     ws.set_column(4, 4, 35); ws.set_column(5, 5, 15); ws.set_column(6, 6, 35); ws.set_column(7, 7, 10)
     ws.set_column(8, 8, 6); ws.set_column(9, 9, 12); ws.set_column(10, 10, 25); ws.set_column(11, 12, 14)
-    ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8)
+    ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8); ws.set_column(16, 16, 25)
 
     fmt_cache = {}
     r = 3
@@ -1264,9 +1470,9 @@ def exportar_excel():
             if curr_turno in ('MAÑANA','TARDE') and (curr_date != prev_date or curr_turno != prev_turno):
                 turno_icon = 'MAÑANA ☀️' if curr_turno == 'MAÑANA' else 'TARDE 🌙'
                 if curr_date != prev_date:
-                    ws.merge_range(r, 0, r, 15, f"{sep_text} — {turno_icon}", fmt_sep)
+                    ws.merge_range(r, 0, r, 16, f"{sep_text} — {turno_icon}", fmt_sep)
                 else:
-                    ws.merge_range(r, 0, r, 15, f"        {turno_icon}", fmt_sep)
+                    ws.merge_range(r, 0, r, 16, f"        {turno_icon}", fmt_sep)
                 r += 1
             prev_date = curr_date; prev_turno = curr_turno
 
@@ -1294,6 +1500,7 @@ def exportar_excel():
         ws.write(r, 13, row.get('actividad_app', ''), fl)
         ws.write(r, 14, row.get('asistencia', ''), fc)
         ws.write(r, 15, 'SIHCE' if row['sihce'] else '', fc)
+        ws.write(r, 16, row.get('registrado_por', '') or '', fl)
         r += 1
 
     wb.close(); output.seek(0)

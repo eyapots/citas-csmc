@@ -731,7 +731,7 @@ def agenda():
                     act = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{he}\')">➕ Agendar</button>'
                 else:
                     pe = c["paciente"].replace("'","\\'")
-                    act = f'<form method="POST" action="/cita/eliminar/{c["id"]}" onsubmit="return confirm(\'¿Eliminar cita de {pe}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
+                    act = f'<a href="/cita/imprimir/{c["id"]}" target="_blank" class="btn btn-sm btn-secondary" title="Imprimir">🖨️</a> <form method="POST" action="/cita/eliminar/{c["id"]}" style="display:inline" onsubmit="return confirm(\'¿Eliminar cita de {pe}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
                 citas_html += f'<tr class="cita-row {rc}" style="{st}"><td>{c["turno"][:3]}</td><td class="td-hora"><strong>{c["hora_inicio"]} - {c["hora_fin"]}</strong></td><td>{pc}</td><td>{c["dni"] if c["estado"]=="Confirmado" else ""}</td><td>{th}</td><td>{sh}</td><td>{sthtml}</td><td>{ah}</td><td>{act}</td></tr>'
             citas_html += '</tbody></table></div>'
         else: citas_html = '<div class="empty-state"><p>No hay cupos para esta combinación.</p></div>'
@@ -1134,6 +1134,91 @@ def _cambiar_turno_form(prof_options, resultado=''):
         <button type="submit" class="btn btn-danger">🗑️ Eliminar Cupos</button>
     </form></div>
     {resultado}'''
+
+@app.route('/cita/imprimir/<int:cita_id>')
+@login_required
+def imprimir_cita(cita_id):
+    conn = get_db()
+    cita = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE c.id=?""", (cita_id,)).fetchone()
+    if not cita:
+        conn.close()
+        return "Cita no encontrada", 404
+
+    cita = dict(cita)
+
+    sihce_info = ''
+    if cita['sihce'] and cita.get('sihce_prof_id'):
+        sp = conn.execute("SELECT nombre FROM profesionales WHERE id=?", (cita['sihce_prof_id'],)).fetchone()
+        if sp: sihce_info = f'<tr><td><strong>SIHCE con:</strong></td><td>{sp["nombre"]}</td></tr>'
+    conn.close()
+
+    try:
+        dt = datetime.strptime(cita['fecha'], '%Y-%m-%d')
+        fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+    except:
+        fecha_display = cita['fecha']
+
+    tipo_badge = 'NUEVO' if cita['tipo_paciente'] == 'NUEVO' else 'CONTINUADOR'
+
+    html = f'''<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Cita - {cita['paciente']}</title>
+<style>
+    @page {{ size: A5; margin: 10mm; }}
+    * {{ margin:0; padding:0; box-sizing:border-box; }}
+    body {{ font-family: Arial, sans-serif; font-size: 11px; padding: 10mm; max-width: 148mm; }}
+    .header {{ text-align: center; border-bottom: 2px solid #1a365d; padding-bottom: 8px; margin-bottom: 10px; }}
+    .header h1 {{ font-size: 14px; color: #1a365d; margin-bottom: 2px; }}
+    .header p {{ font-size: 9px; color: #666; }}
+    .titulo {{ background: #1a365d; color: white; text-align: center; padding: 6px; font-size: 13px; font-weight: bold; margin-bottom: 10px; }}
+    table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
+    td {{ padding: 4px 8px; border: 1px solid #ddd; vertical-align: top; }}
+    td:first-child {{ width: 35%; font-weight: bold; background: #f8f9fa; font-size: 10px; }}
+    .tipo {{ display: inline-block; padding: 2px 8px; border-radius: 3px; font-weight: bold; font-size: 10px;
+        background: {('#fef3c7' if tipo_badge == 'NUEVO' else '#dbeafe')}; color: {('#92400e' if tipo_badge == 'NUEVO' else '#1e40af')}; }}
+    .footer {{ margin-top: 15px; text-align: center; font-size: 8px; color: #999; border-top: 1px solid #ddd; padding-top: 8px; }}
+    .firma {{ margin-top: 25px; display: flex; justify-content: space-around; }}
+    .firma-linea {{ text-align: center; }}
+    .firma-linea hr {{ border: none; border-top: 1px solid #333; width: 120px; margin-bottom: 3px; }}
+    .firma-linea p {{ font-size: 8px; color: #666; }}
+    .nota {{ background: #fff3e0; padding: 5px 8px; border-radius: 4px; font-size: 9px; margin-top: 8px; color: #e65100; }}
+    @media print {{ body {{ padding: 5mm; }} .no-print {{ display: none !important; }} }}
+</style></head><body>
+    <div class="no-print" style="text-align:center;margin-bottom:10px">
+        <button onclick="window.print()" style="padding:8px 20px;font-size:13px;background:#1a365d;color:white;border:none;border-radius:4px;cursor:pointer">🖨️ Imprimir</button>
+        <button onclick="window.close()" style="padding:8px 20px;font-size:13px;background:#e2e8f0;border:none;border-radius:4px;cursor:pointer;margin-left:5px">Cerrar</button>
+    </div>
+    <div class="header">
+        <h1>🏥 CENTRO DE SALUD MENTAL COMUNITARIO</h1>
+        <p>Sistema de Gestión de Citas</p>
+    </div>
+    <div class="titulo">COMPROBANTE DE CITA</div>
+    <table>
+        <tr><td><strong>Paciente:</strong></td><td style="font-size:13px;font-weight:bold">{cita['paciente']}</td></tr>
+        <tr><td><strong>DNI:</strong></td><td>{cita['dni']}</td></tr>
+        <tr><td><strong>Edad:</strong></td><td>{cita.get('edad', '')}</td></tr>
+        <tr><td><strong>Celular:</strong></td><td>{cita['celular']}</td></tr>
+        <tr><td><strong>Tipo:</strong></td><td><span class="tipo">{tipo_badge}</span></td></tr>
+    </table>
+    <table>
+        <tr><td><strong>Fecha:</strong></td><td style="font-size:12px;font-weight:bold">{fecha_display}</td></tr>
+        <tr><td><strong>Hora:</strong></td><td style="font-size:12px;font-weight:bold">{cita['hora_inicio']} - {cita['hora_fin']}</td></tr>
+        <tr><td><strong>Turno:</strong></td><td>{cita['turno']}</td></tr>
+        <tr><td><strong>Área:</strong></td><td>{cita['area']}</td></tr>
+        <tr><td><strong>Profesional:</strong></td><td>{cita['prof_nombre']}</td></tr>
+        {sihce_info}
+    </table>
+    {"<div class='nota'>📝 " + cita['observaciones'] + "</div>" if cita['observaciones'] else ""}
+    <div class="firma">
+        <div class="firma-linea"><hr><p>Firma del profesional</p></div>
+        <div class="firma-linea"><hr><p>Firma del paciente</p></div>
+    </div>
+    <div class="footer">
+        Documento generado el {datetime.now().strftime('%d/%m/%Y %H:%M')} — Sistema de Citas CSMC
+    </div>
+</body></html>'''
+    return html
 
 @app.route('/reporte_diario')
 @login_required

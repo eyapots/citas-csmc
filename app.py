@@ -861,10 +861,64 @@ def cambiar_turno():
 
     resultado = ''
     if request.method == 'POST':
+        accion = request.form.get('accion', 'cambiar')
         prof_id = int(request.form.get('prof_id', 0))
         fecha = request.form.get('fecha', '')
         nuevo_turno = request.form.get('nuevo_turno', '')
+        fecha_destino = request.form.get('fecha_destino', '') or fecha
 
+        # ACCION: ELIMINAR cupos de una fecha
+        if accion == 'eliminar':
+            if prof_id and fecha:
+                confirmar = request.form.get('confirmar', '')
+                prof = conn.execute("SELECT * FROM profesionales WHERE id=?", (prof_id,)).fetchone()
+                citas_dia = conn.execute("SELECT * FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha)).fetchall()
+                pac_conf = [c for c in citas_dia if c['estado'] == 'Confirmado']
+
+                if not confirmar:
+                    try:
+                        dt = datetime.strptime(fecha, '%Y-%m-%d')
+                        fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+                    except: fecha_display = fecha
+
+                    warning = ''
+                    if pac_conf:
+                        warning = f'<div class="flash flash-danger">⚠️ HAY {len(pac_conf)} PACIENTE(S) AGENDADO(S) que se perderán:<br>'
+                        for p in pac_conf: warning += f'• {p["paciente"]} ({p["hora_inicio"]}-{p["hora_fin"]})<br>'
+                        warning += '</div>'
+
+                    resultado = f'''<div class="card" style="border:2px solid #c62828">
+                        <h3>🗑️ Eliminar cupos</h3>
+                        <p><strong>Profesional:</strong> {prof["nombre"]}</p>
+                        <p><strong>Fecha:</strong> {fecha_display}</p>
+                        <p><strong>Cupos a eliminar:</strong> {len(citas_dia)}</p>
+                        {warning}
+                        <form method="POST" style="margin-top:1rem">
+                            <input type="hidden" name="accion" value="eliminar">
+                            <input type="hidden" name="prof_id" value="{prof_id}">
+                            <input type="hidden" name="fecha" value="{fecha}">
+                            <input type="hidden" name="confirmar" value="1">
+                            <button type="submit" class="btn btn-danger btn-lg" onclick="return confirm('¿ELIMINAR todos los cupos de {prof['nombre']} el {fecha}?')">🗑️ Confirmar Eliminación</button>
+                            <a href="/cambiar_turno" class="btn btn-secondary btn-lg">❌ Cancelar</a>
+                        </form></div>'''
+                else:
+                    conn.execute("DELETE FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha))
+                    try:
+                        dt = datetime.strptime(fecha, '%Y-%m-%d')
+                        conn.execute("DELETE FROM roles_mensuales WHERE profesional_id=? AND anio=? AND mes=? AND dia=?",
+                            (prof_id, dt.year, dt.month, dt.day))
+                    except: pass
+                    conn.commit()
+                    flash(f'Cupos eliminados: {prof["nombre"]} el {fecha} ({len(citas_dia)} cupos, {len(pac_conf)} pacientes)', 'success')
+                    conn.close()
+                    return redirect('/cambiar_turno')
+
+            conn.close()
+            prof_options = ''.join(f'<option value="{p["id"]}">{p["nombre"]} ({p["especialidad"]})</option>' for p in profesionales)
+            flash_msgs = session.pop('_flashes', [])
+            return page('Cambiar Turno', _cambiar_turno_form(prof_options, resultado), flash_msgs)
+
+        # ACCION: CAMBIAR turno
         if not prof_id or not fecha or not nuevo_turno:
             flash('Complete todos los campos', 'danger')
             conn.close()
@@ -876,19 +930,25 @@ def cambiar_turno():
             conn.close()
             return redirect('/cambiar_turno')
 
-        # Get existing appointments for this professional on this date
+        # Get existing appointments from SOURCE date
         citas_existentes = conn.execute(
             "SELECT * FROM citas WHERE profesional_id=? AND fecha=? ORDER BY hora_inicio",
             (prof_id, fecha)).fetchall()
-
-        # Separate: patients with data vs empty slots
         pacientes = [dict(c) for c in citas_existentes if c['estado'] == 'Confirmado']
         total_prev = len(citas_existentes)
 
-        # Generate new slots for the new shift
+        # Check if DESTINATION date already has slots
+        if fecha_destino != fecha:
+            citas_destino = conn.execute("SELECT * FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha_destino)).fetchall()
+            pac_destino = [c for c in citas_destino if c['estado'] == 'Confirmado']
+            if pac_destino:
+                flash(f'La fecha destino {fecha_destino} ya tiene {len(pac_destino)} pacientes agendados. Elimine esos cupos primero o elija otra fecha.', 'danger')
+                conn.close()
+                return redirect('/cambiar_turno')
+
+        # Generate new slots
         is_med = prof['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA', 'SIHCE')
         is_to = prof['especialidad'] == 'TERAPIA OCUPACIONAL'
-
         new_slots = []
         if is_to:
             if nuevo_turno == 'M':
@@ -918,35 +978,31 @@ def cambiar_turno():
                 new_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
                 new_slots.extend(_make_slots("13:45", 6, 45, 'TARDE'))
 
-        # Count available patient slots (exclude ADMINISTRATIVA)
         patient_slots = [s for s in new_slots if s['turno'] != 'ADMINISTRATIVA']
         slots_disponibles = len(patient_slots)
         pacientes_sin_cupo = []
-
         if len(pacientes) > slots_disponibles:
             pacientes_sin_cupo = pacientes[slots_disponibles:]
             pacientes = pacientes[:slots_disponibles]
 
-        # Confirmation step
         confirmar = request.form.get('confirmar', '')
         if not confirmar:
-            # Show preview
             try:
                 dt = datetime.strptime(fecha, '%Y-%m-%d')
                 fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+                dt2 = datetime.strptime(fecha_destino, '%Y-%m-%d')
+                fecha_dest_display = f"{DIAS_ES[dt2.weekday()]} {dt2.day} de {MESES_ES[dt2.month]} {dt2.year}"
             except:
-                fecha_display = fecha
+                fecha_display = fecha; fecha_dest_display = fecha_destino
 
-            turno_prev = ''
-            if citas_existentes:
-                turnos = set(c['turno'] for c in citas_existentes if c['turno'] != 'ADMINISTRATIVA')
-                turno_prev = ', '.join(turnos)
+            turnos_prev = set(c['turno'] for c in citas_existentes if c['turno'] != 'ADMINISTRATIVA')
+            turno_prev = ', '.join(turnos_prev) if turnos_prev else 'Sin turno'
 
+            cambio_dia = fecha != fecha_destino
             pac_rows = ''
             for i, p in enumerate(pacientes):
-                dest = patient_slots[i] if i < len(patient_slots) else None
-                if dest:
-                    pac_rows += f'<tr><td>{p["paciente"]}</td><td>{p["hora_inicio"]}-{p["hora_fin"]}</td><td style="color:green;font-weight:700">{dest["inicio"]}-{dest["fin"]} ({dest["turno"]})</td></tr>'
+                dest = patient_slots[i]
+                pac_rows += f'<tr><td>{p["paciente"]}</td><td>{p["hora_inicio"]}-{p["hora_fin"]}</td><td style="color:green;font-weight:700">{dest["inicio"]}-{dest["fin"]} ({dest["turno"]})</td></tr>'
 
             warning = ''
             if pacientes_sin_cupo:
@@ -955,80 +1011,102 @@ def cambiar_turno():
                     warning += f'• {p["paciente"]} ({p["hora_inicio"]}-{p["hora_fin"]})<br>'
                 warning += 'Estos pacientes se perderán si continúa.</div>'
 
+            dia_info = f'<p style="color:#1565c0;font-weight:700">📅 Los pacientes se MOVERÁN al {fecha_dest_display}</p>' if cambio_dia else ''
+
             resultado = f'''<div class="card" style="border:2px solid #ff8f00">
                 <h3>📋 Vista previa del cambio</h3>
                 <p><strong>Profesional:</strong> {prof["nombre"]}</p>
-                <p><strong>Fecha:</strong> {fecha_display}</p>
-                <p><strong>Turno actual:</strong> {turno_prev or "Sin turno"} ({total_prev} cupos)</p>
-                <p><strong>Nuevo turno:</strong> {nuevo_turno} ({len(new_slots)} cupos, {slots_disponibles} para pacientes)</p>
+                <p><strong>Fecha origen:</strong> {fecha_display} — Turno: {turno_prev} ({total_prev} cupos)</p>
+                <p><strong>{"Fecha destino" if cambio_dia else "Misma fecha"}:</strong> {fecha_dest_display if cambio_dia else fecha_display} — Nuevo turno: {nuevo_turno} ({len(new_slots)} cupos, {slots_disponibles} para pacientes)</p>
                 <p><strong>Pacientes agendados:</strong> {len(pacientes) + len(pacientes_sin_cupo)}</p>
-                {warning}
-                {"<div class='table-wrapper'><table class='citas-table'><thead><tr><th>Paciente</th><th>Horario actual</th><th>Nuevo horario</th></tr></thead><tbody>" + pac_rows + "</tbody></table></div>" if pac_rows else "<p>No hay pacientes agendados para esta fecha.</p>"}
+                {dia_info}{warning}
+                {"<div class='table-wrapper'><table class='citas-table'><thead><tr><th>Paciente</th><th>Horario actual</th><th>Nuevo horario</th></tr></thead><tbody>" + pac_rows + "</tbody></table></div>" if pac_rows else "<p>No hay pacientes agendados.</p>"}
                 <form method="POST" style="margin-top:1rem">
+                    <input type="hidden" name="accion" value="cambiar">
                     <input type="hidden" name="prof_id" value="{prof_id}">
                     <input type="hidden" name="fecha" value="{fecha}">
+                    <input type="hidden" name="fecha_destino" value="{fecha_destino}">
                     <input type="hidden" name="nuevo_turno" value="{nuevo_turno}">
                     <input type="hidden" name="confirmar" value="1">
-                    <button type="submit" class="btn btn-warning btn-lg" onclick="return confirm('¿Confirmar cambio de turno?')">✅ Confirmar Cambio de Turno</button>
+                    <button type="submit" class="btn btn-warning btn-lg" onclick="return confirm('¿Confirmar cambio de turno?')">✅ Confirmar Cambio</button>
                     <a href="/cambiar_turno" class="btn btn-secondary btn-lg">❌ Cancelar</a>
-                </form>
-            </div>'''
+                </form></div>'''
         else:
-            # Execute the change
-            # Delete all existing slots for this date/professional
+            # Execute: delete source
             conn.execute("DELETE FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha))
-
-            # Update roles_mensuales
             try:
                 dt = datetime.strptime(fecha, '%Y-%m-%d')
-                conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
-                    (prof_id, dt.year, dt.month, dt.day, nuevo_turno))
+                conn.execute("DELETE FROM roles_mensuales WHERE profesional_id=? AND anio=? AND mes=? AND dia=?",
+                    (prof_id, dt.year, dt.month, dt.day))
             except: pass
 
-            # Insert new slots
+            # If different destination, also clear destination
+            if fecha_destino != fecha:
+                conn.execute("DELETE FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, fecha_destino))
+                try:
+                    dt2 = datetime.strptime(fecha_destino, '%Y-%m-%d')
+                    conn.execute("DELETE FROM roles_mensuales WHERE profesional_id=? AND anio=? AND mes=? AND dia=?",
+                        (prof_id, dt2.year, dt2.month, dt2.day))
+                except: pass
+
+            # Update roles_mensuales for destination
+            try:
+                dt_dest = datetime.strptime(fecha_destino, '%Y-%m-%d')
+                conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
+                    (prof_id, dt_dest.year, dt_dest.month, dt_dest.day, nuevo_turno))
+            except: pass
+
+            # Insert new slots at destination date
             pac_idx = 0
             for slot in new_slots:
-                pac = ''; dni = ''; edad = ''; cel = ''; obs = ''; estado = 'Disponible'
-                tipo = ''; app_act = ''; asist = 'Pendiente'; sihce = 0; sihce_pid = 0; creado = None; modif = None
-
+                pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'
+                tipo=''; app_act=''; asist='Pendiente'; sihce=0; sihce_pid=0; creado=None; modif=None
                 if slot['turno'] != 'ADMINISTRATIVA' and pac_idx < len(pacientes):
                     p = pacientes[pac_idx]
-                    pac = p['paciente']; dni = p['dni']; edad = p.get('edad', '')
-                    cel = p['celular']; obs = p['observaciones']; estado = 'Confirmado'
-                    tipo = p['tipo_paciente']; app_act = p.get('actividad_app', '')
-                    asist = p.get('asistencia', 'Pendiente')
-                    sihce = p.get('sihce', 0); sihce_pid = p.get('sihce_prof_id', 0)
-                    creado = p.get('creado_por'); modif = p.get('modificado_por')
+                    pac=p['paciente']; dni=p['dni']; edad=p.get('edad','')
+                    cel=p['celular']; obs=p['observaciones']; estado='Confirmado'
+                    tipo=p['tipo_paciente']; app_act=p.get('actividad_app','')
+                    asist=p.get('asistencia','Pendiente')
+                    sihce=p.get('sihce',0); sihce_pid=p.get('sihce_prof_id',0)
+                    creado=p.get('creado_por'); modif=p.get('modificado_por')
                     pac_idx += 1
-
                 conn.execute("""INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,
                     paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,
                     asistencia,sihce,sihce_prof_id,creado_por,modificado_por,modificado_en)
                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-                    (prof_id, fecha, slot['inicio'], slot['fin'], slot['turno'], prof['especialidad'],
+                    (prof_id, fecha_destino, slot['inicio'], slot['fin'], slot['turno'], prof['especialidad'],
                      pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce, sihce_pid, creado, modif))
 
+            detalle = f'{prof["nombre"]} | {fecha}→{fecha_destino} | Turno: {nuevo_turno} | {len(pacientes)} pac trasladados'
             conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
-                (0, session['user_id'], 'CAMBIO_TURNO', f'{prof["nombre"]} | {fecha} | Nuevo: {nuevo_turno} | {len(pacientes)} pacientes trasladados'))
+                (0, session['user_id'], 'CAMBIO_TURNO', detalle))
             conn.commit()
 
-            perdidos_msg = f' | {len(pacientes_sin_cupo)} paciente(s) no cupieron' if pacientes_sin_cupo else ''
-            flash(f'Turno cambiado: {prof["nombre"]} → {nuevo_turno} en {fecha}. {len(pacientes)} pacientes trasladados.{perdidos_msg}', 'success')
+            perdidos = f' | {len(pacientes_sin_cupo)} no cupieron' if pacientes_sin_cupo else ''
+            flash(f'Turno cambiado: {prof["nombre"]} → {nuevo_turno} en {fecha_destino}. {len(pacientes)} pacientes trasladados.{perdidos}', 'success')
             conn.close()
             return redirect('/cambiar_turno')
 
     conn.close()
-
     prof_options = ''.join(f'<option value="{p["id"]}">{p["nombre"]} ({p["especialidad"]})</option>' for p in profesionales)
-    content = f'''<div class="page-header"><h2>🔄 Cambiar Turno de Profesional</h2></div>
-    <div class="card"><h3>Seleccionar cambio</h3>
+    flash_msgs = session.pop('_flashes', [])
+    return page('Cambiar Turno - Sistema de Citas', _cambiar_turno_form(prof_options, resultado), flash_msgs)
+
+def _cambiar_turno_form(prof_options, resultado=''):
+    today = datetime.now().strftime('%Y-%m-%d')
+    return f'''<div class="page-header"><h2>🔄 Cambiar Turno de Profesional</h2></div>
+    <div class="card"><h3>Cambiar o crear turno</h3>
     <form method="POST">
+        <input type="hidden" name="accion" value="cambiar">
         <div class="form-row">
             <div class="form-group"><label>Profesional</label>
                 <select name="prof_id" class="form-select" required><option value="">— Seleccionar —</option>{prof_options}</select>
             </div>
-            <div class="form-group"><label>Fecha</label>
+            <div class="form-group"><label>Fecha origen (día actual del profesional)</label>
                 <input type="date" name="fecha" class="form-input" required>
+            </div>
+            <div class="form-group"><label>Fecha destino (dejar igual si solo cambia turno)</label>
+                <input type="date" name="fecha_destino" class="form-input" placeholder="Opcional">
             </div>
             <div class="form-group"><label>Nuevo Turno</label>
                 <select name="nuevo_turno" class="form-select" required>
@@ -1042,10 +1120,20 @@ def cambiar_turno():
         </div>
         <button type="submit" class="btn btn-warning btn-lg">🔍 Ver Vista Previa</button>
     </form></div>
+    <div class="card" style="border:1px solid #c62828"><h3>🗑️ Eliminar cupos de una fecha (corregir errores)</h3>
+    <form method="POST">
+        <input type="hidden" name="accion" value="eliminar">
+        <div class="form-row">
+            <div class="form-group"><label>Profesional</label>
+                <select name="prof_id" class="form-select" required><option value="">— Seleccionar —</option>{prof_options}</select>
+            </div>
+            <div class="form-group"><label>Fecha a eliminar</label>
+                <input type="date" name="fecha" class="form-input" required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-danger">🗑️ Eliminar Cupos</button>
+    </form></div>
     {resultado}'''
-
-    flash_msgs = session.pop('_flashes', [])
-    return page('Cambiar Turno - Sistema de Citas', content, flash_msgs)
 
 @app.route('/reporte_diario')
 @login_required

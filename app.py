@@ -723,7 +723,7 @@ def agenda():
                         if sp_id:
                             sp = conn.execute("SELECT nombre FROM profesionales WHERE id=?", (sp_id,)).fetchone()
                             if sp: sh += f'<br><small style="color:#e65100">🔗 {sp["nombre"]}</small>'
-                    sh += f' <button class="btn-asist" onclick="toggleSihce({c["id"]},{1 if not sv else 0})" title="SIHCE">🔗</button>'
+                    sh += f' <span class="btn-asist" style="opacity:0.4;cursor:default" title="SIHCE deshabilitado">🔗</span>'
                 sc = 'status-confirmado' if c['estado'] == 'Confirmado' else 'status-disponible'
                 sthtml = f'<span class="status-dot {sc}"></span>{c["estado"]}'
                 ah = ''

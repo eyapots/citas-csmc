@@ -535,7 +535,7 @@ function renderCalendar(fechas){
     fechas.forEach(function(f){
         var k=f.year+"-"+f.month;
         if(!months[k])months[k]={year:f.year,month:f.month,dates:{}};
-        months[k].dates[f.day]={turno:f.turno,value:f.value};
+        months[k].dates[f.day]={turno:f.turno,value:f.value,lleno:f.lleno||0,ocupados:f.ocupados||0,total:f.total||0};
     });
     var meses=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     var dias=["L","M","X","J","V","S","D"];
@@ -554,14 +554,15 @@ function renderCalendar(fechas){
             if(info){
                 var cls="turno-"+info.turno.toLowerCase();
                 var sel=info.value===selF?" selected":"";
-                var lleno=info.lleno?'<span style="position:absolute;top:0;right:1px;font-size:7px">⛔</span>':'<span style="position:absolute;bottom:0;right:1px;font-size:6px;opacity:.7">'+info.ocupados+'/'+info.total+'</span>';
-                html+='<div class="cal-day '+cls+sel+'" style="position:relative" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+(info.lleno?' LLENO':' '+info.ocupados+'/'+info.total)+'">'+d+lleno+'</div>';
+                var lleno_s=info.lleno?'border:2px solid #c62828;box-shadow:0 0 4px #c62828':'';
+                var badge=info.lleno?'<span style="position:absolute;top:-3px;right:-3px;background:#c62828;color:#fff;border-radius:50%;width:15px;height:15px;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:bold">!</span>':'<span style="position:absolute;bottom:0;right:1px;font-size:7px;opacity:.6;color:#333">'+info.ocupados+'/'+info.total+'</span>';
+                html+='<div class="cal-day '+cls+sel+'" style="position:relative;'+lleno_s+'" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+(info.lleno?' - LLENO':' - '+info.ocupados+'/'+info.total)+'">'+d+badge+'</div>';
             }else{
                 html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
             }
         }
         html+='</div>';
-        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span><span>⛔ Lleno</span></div>';
+        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span><span><span style="display:inline-block;width:10px;height:10px;border:2px solid #c62828;border-radius:50%;margin-right:3px"></span> Lleno</span><span style="font-size:.7rem;color:#666">N/T = ocupados/total</span></div>';
         html+='</div>';
     });
     c.innerHTML=html;

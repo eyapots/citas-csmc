@@ -554,13 +554,14 @@ function renderCalendar(fechas){
             if(info){
                 var cls="turno-"+info.turno.toLowerCase();
                 var sel=info.value===selF?" selected":"";
-                html+='<div class="cal-day '+cls+sel+'" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+'">'+d+'</div>';
+                var lleno=info.lleno?'<span style="position:absolute;top:0;right:1px;font-size:7px">⛔</span>':'<span style="position:absolute;bottom:0;right:1px;font-size:6px;opacity:.7">'+info.ocupados+'/'+info.total+'</span>';
+                html+='<div class="cal-day '+cls+sel+'" style="position:relative" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+(info.lleno?' LLENO':' '+info.ocupados+'/'+info.total)+'">'+d+lleno+'</div>';
             }else{
                 html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
             }
         }
         html+='</div>';
-        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span></div>';
+        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span><span>⛔ Lleno</span></div>';
         html+='</div>';
     });
     c.innerHTML=html;
@@ -647,12 +648,15 @@ def api_fechas(prof_id):
     fechas = []
     for r in rows:
         turno = turno_map.get(r['fecha'], 'M')
+        total = conn.execute("SELECT COUNT(*) as n FROM citas WHERE profesional_id=? AND fecha=? AND turno!='ADMINISTRATIVA'", (prof_id, r['fecha'])).fetchone()['n']
+        ocupados = conn.execute("SELECT COUNT(*) as n FROM citas WHERE profesional_id=? AND fecha=? AND estado='Confirmado'", (prof_id, r['fecha'])).fetchone()['n']
+        lleno = 1 if (total > 0 and ocupados >= total) else 0
         try:
             dt = datetime.strptime(r['fecha'], '%Y-%m-%d')
             dia_sem = DIAS_CORTO[dt.weekday()]
-            fechas.append({'value': r['fecha'], 'label': f"{dt.day} {dia_sem} ({dt.strftime('%d/%m')})", 'turno': turno, 'day': dt.day, 'month': dt.month, 'year': dt.year, 'weekday': dt.weekday()})
+            fechas.append({'value': r['fecha'], 'label': f"{dt.day} {dia_sem} ({dt.strftime('%d/%m')})", 'turno': turno, 'day': dt.day, 'month': dt.month, 'year': dt.year, 'weekday': dt.weekday(), 'lleno': lleno, 'ocupados': ocupados, 'total': total})
         except:
-            fechas.append({'value': r['fecha'], 'label': r['fecha'], 'turno': turno})
+            fechas.append({'value': r['fecha'], 'label': r['fecha'], 'turno': turno, 'lleno': lleno})
     conn.close()
     return jsonify(fechas)
 
@@ -731,7 +735,7 @@ def agenda():
                     act = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{he}\')">➕ Agendar</button>'
                 else:
                     pe = c["paciente"].replace("'","\\'")
-                    act = f'<a href="/cita/imprimir/{c["id"]}" target="_blank" class="btn btn-sm btn-secondary" title="Imprimir">🖨️</a> <form method="POST" action="/cita/eliminar/{c["id"]}" style="display:inline" onsubmit="return confirm(\'¿Eliminar cita de {pe}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
+                    act = f'<a href="/cita/editar/{c["id"]}" class="btn btn-sm btn-warning" title="Editar">✏️</a> <a href="/cita/migrar/{c["id"]}" class="btn btn-sm btn-primary" title="Migrar">📦</a> <a href="/cita/imprimir/{c["id"]}" target="_blank" class="btn btn-sm btn-secondary" title="Imprimir">🖨️</a> <form method="POST" action="/cita/eliminar/{c["id"]}" style="display:inline" onsubmit="return confirm(\'¿Eliminar cita de {pe}?\')"><button type="submit" class="btn btn-sm btn-danger">🗑️</button></form>'
                 citas_html += f'<tr class="cita-row {rc}" style="{st}"><td>{c["turno"][:3]}</td><td class="td-hora"><strong>{c["hora_inicio"]} - {c["hora_fin"]}</strong></td><td>{pc}</td><td>{c["dni"] if c["estado"]=="Confirmado" else ""}</td><td>{th}</td><td>{sh}</td><td>{sthtml}</td><td>{ah}</td><td>{act}</td></tr>'
             citas_html += '</tbody></table></div>'
         else: citas_html = '<div class="empty-state"><p>No hay cupos para esta combinación.</p></div>'
@@ -750,8 +754,8 @@ def agenda():
         <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div></div>
         <div class="form-row"><div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
-        <div class="form-group"><label>SIHCE</label><select name="sihce" id="sihce-sel" class="form-select" onchange="toggleSihceProf(this.value)"><option value="0">No</option><option value="1">Sí - SIHCE</option></select></div></div>
-        <div id="sihce-prof-div" class="form-group" style="display:none;background:#fff3e0;padding:.75rem;border-radius:6px;border:2px solid #ff6f00"><label style="color:#e65100">🔗 Médico/Psiquiatra para atención conjunta SIHCE</label><select name="sihce_prof_id" id="sihce-prof-sel" class="form-select"><option value="0">— Seleccionar —</option></select></div>
+        </div>
+        <input type="hidden" name="sihce" value="0"><input type="hidden" name="sihce_prof_id" value="0">
         <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label><select name="actividad_app" class="form-select">
         <option value="">— No aplica —</option><option value="VISITA DOMICILIARIA">Visita domiciliaria</option><option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
         <option value="GAM ADULTO">GAM adulto</option><option value="GAM NIÑO">GAM niño</option><option value="GAM ADICCIONES">GAM adicciones</option>
@@ -1134,6 +1138,175 @@ def _cambiar_turno_form(prof_options, resultado=''):
         <button type="submit" class="btn btn-danger">🗑️ Eliminar Cupos</button>
     </form></div>
     {resultado}'''
+
+
+@app.route('/cita/editar/<int:cita_id>', methods=['GET', 'POST'])
+@login_required
+def editar_cita(cita_id):
+    if session.get('user_rol') == 'lector':
+        flash('No tiene permisos (solo lectura)', 'danger')
+        return redirect('/')
+    conn = get_db()
+    cita = dict(conn.execute("SELECT c.*, p.nombre as prof_nombre FROM citas c JOIN profesionales p ON p.id=c.profesional_id WHERE c.id=?", (cita_id,)).fetchone())
+
+    if request.method == 'POST':
+        conn.execute("""UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?,
+            tipo_paciente=?, actividad_app=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?""",
+            (request.form.get('paciente','').strip().upper(), request.form.get('dni','').strip(),
+             request.form.get('edad','').strip(), request.form.get('celular','').strip(),
+             request.form.get('observaciones','').strip(), request.form.get('tipo_paciente','NUEVO'),
+             request.form.get('actividad_app','').strip(), session['user_id'], cita_id))
+        conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+            (cita_id, session['user_id'], 'EDITAR', f'Editado: {request.form.get("paciente","")}'))
+        conn.commit(); conn.close()
+        flash('Datos del paciente actualizados', 'success')
+        return redirect(f'/?prof_id={cita["profesional_id"]}&fecha={cita["fecha"]}')
+
+    conn.close()
+    try:
+        dt = datetime.strptime(cita['fecha'], '%Y-%m-%d')
+        fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+    except: fecha_display = cita['fecha']
+
+    sel_nuevo = 'selected' if cita.get('tipo_paciente') == 'NUEVO' else ''
+    sel_cont = 'selected' if cita.get('tipo_paciente') == 'CONTINUADOR' else ''
+
+    content = f'''<div class="page-header"><h2>✏️ Editar Paciente</h2></div>
+    <div class="card">
+        <p><strong>Profesional:</strong> {cita['prof_nombre']} | <strong>Fecha:</strong> {fecha_display} | <strong>Hora:</strong> {cita['hora_inicio']} - {cita['hora_fin']}</p>
+        <form method="POST" style="margin-top:1rem">
+            <div class="form-row">
+                <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" class="form-input" value="{cita['paciente']}" required></div>
+                <div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" value="{cita['dni']}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" value="{cita.get('edad','')}"></div>
+                <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" value="{cita['celular']}"></div>
+                <div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO" {sel_nuevo}>NUEVO</option><option value="CONTINUADOR" {sel_cont}>CONTINUADOR</option></select></div>
+            </div>
+            <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" value="{cita.get('observaciones','')}"></div>
+            <div class="form-group"><label>APP</label><select name="actividad_app" class="form-select">
+                <option value="">No aplica</option>
+                <option value="VISITA DOMICILIARIA" {'selected' if cita.get('actividad_app')=='VISITA DOMICILIARIA' else ''}>Visita domiciliaria</option>
+                <option value="SEGUIMIENTO A USUARIOS" {'selected' if cita.get('actividad_app')=='SEGUIMIENTO A USUARIOS' else ''}>Seguimiento a usuarios</option>
+                <option value="GAM ADULTO" {'selected' if cita.get('actividad_app')=='GAM ADULTO' else ''}>GAM adulto</option>
+                <option value="GAM NIÑO" {'selected' if cita.get('actividad_app')=='GAM NIÑO' else ''}>GAM ni\u00f1o</option>
+                <option value="GAM ADICCIONES" {'selected' if cita.get('actividad_app')=='GAM ADICCIONES' else ''}>GAM adicciones</option>
+            </select></div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">💾 Guardar Cambios</button>
+                <a href="/?prof_id={cita['profesional_id']}&fecha={cita['fecha']}" class="btn btn-secondary">Cancelar</a>
+            </div>
+        </form>
+    </div>'''
+    return page('Editar Paciente', content)
+
+
+@app.route('/cita/migrar/<int:cita_id>', methods=['GET', 'POST'])
+@login_required
+def migrar_cita(cita_id):
+    if session.get('user_rol') == 'lector':
+        flash('No tiene permisos (solo lectura)', 'danger')
+        return redirect('/')
+    conn = get_db()
+    cita = dict(conn.execute("SELECT c.*, p.nombre as prof_nombre FROM citas c JOIN profesionales p ON p.id=c.profesional_id WHERE c.id=?", (cita_id,)).fetchone())
+    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
+
+    if request.method == 'POST':
+        dest_id = int(request.form.get('dest_cita_id', 0))
+        accion = request.form.get('accion', 'mover')
+        if not dest_id:
+            flash('Seleccione un cupo destino', 'danger')
+            conn.close()
+            return redirect(f'/cita/migrar/{cita_id}')
+
+        dest = conn.execute("SELECT * FROM citas WHERE id=? AND estado='Disponible'", (dest_id,)).fetchone()
+        if not dest:
+            flash('El cupo destino no esta disponible', 'danger')
+            conn.close()
+            return redirect(f'/cita/migrar/{cita_id}')
+
+        conn.execute("""UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?,
+            estado='Confirmado', tipo_paciente=?, actividad_app=?, sihce=?, sihce_prof_id=?,
+            creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?""",
+            (cita['paciente'], cita['dni'], cita.get('edad',''), cita['celular'],
+             cita.get('observaciones',''), cita.get('tipo_paciente',''), cita.get('actividad_app',''),
+             cita.get('sihce',0), cita.get('sihce_prof_id',0),
+             cita.get('creado_por'), session['user_id'], dest_id))
+
+        if accion == 'mover':
+            conn.execute("""UPDATE citas SET paciente='',dni='',edad='',celular='',observaciones='',
+                estado='Disponible',tipo_paciente='',actividad_app='',asistencia='Pendiente',
+                sihce=0,sihce_prof_id=0,modificado_por=?,modificado_en=CURRENT_TIMESTAMP WHERE id=?""",
+                (session['user_id'], cita_id))
+            conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+                (cita_id, session['user_id'], 'MIGRAR', f'{cita["paciente"]} movido a cupo {dest_id}'))
+            flash(f'Paciente {cita["paciente"]} migrado exitosamente', 'success')
+        else:
+            conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+                (dest_id, session['user_id'], 'REAGENDAR', f'{cita["paciente"]} copiado desde cupo {cita_id}'))
+            flash(f'Paciente {cita["paciente"]} reagendado (cita original se mantiene)', 'success')
+
+        conn.commit(); conn.close()
+        return redirect(f'/?prof_id={dest["profesional_id"]}&fecha={dest["fecha"]}')
+
+    dest_prof = request.args.get('dest_prof', '')
+    dest_fecha = request.args.get('dest_fecha', '')
+    cupos_html = ''
+    if dest_prof and dest_fecha:
+        cupos = conn.execute("""SELECT c.id, c.hora_inicio, c.hora_fin, c.turno FROM citas c
+            WHERE c.profesional_id=? AND c.fecha=? AND c.estado='Disponible' AND c.turno!='ADMINISTRATIVA'
+            ORDER BY c.hora_inicio""", (dest_prof, dest_fecha)).fetchall()
+        if cupos:
+            cupos_html = '<div class="form-group"><label>Cupo destino</label><select name="dest_cita_id" class="form-select" required><option value="">Seleccionar hora</option>'
+            for cu in cupos:
+                cupos_html += f'<option value="{cu["id"]}">{cu["hora_inicio"]} - {cu["hora_fin"]} ({cu["turno"]})</option>'
+            cupos_html += '</select></div>'
+        else:
+            cupos_html = '<p style="color:#c62828;font-weight:bold">No hay cupos disponibles en esa fecha</p>'
+
+    conn.close()
+    try:
+        dt = datetime.strptime(cita['fecha'], '%Y-%m-%d')
+        fecha_display = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]} {dt.year}"
+    except: fecha_display = cita['fecha']
+
+    prof_opts = ''.join(f'<option value="{p["id"]}" {"selected" if str(p["id"])==dest_prof else ""}>{p["nombre"]} ({p["especialidad"]})</option>' for p in profesionales)
+
+    cupos_form = ''
+    if cupos_html:
+        cupos_form = f'''<div class="card"><h3>Cupos disponibles</h3>
+        <form method="POST">
+            {cupos_html}
+            <div class="form-group" style="margin-top:1rem"><label>Accion</label><select name="accion" class="form-select">
+                <option value="mover">Mover (libera cupo original)</option>
+                <option value="copiar">Reagendar (mantiene cita original)</option>
+            </select></div>
+            <button type="submit" class="btn btn-success btn-lg" style="margin-top:.5rem" onclick="return confirm('Confirmar?')">Confirmar</button>
+            <a href="/?prof_id={cita['profesional_id']}&fecha={cita['fecha']}" class="btn btn-secondary">Cancelar</a>
+        </form></div>'''
+
+    content = f'''<div class="page-header"><h2>📦 Migrar / Reagendar Paciente</h2></div>
+    <div class="card" style="background:#eff6ff;border:2px solid #2b5797">
+        <h3>Paciente actual</h3>
+        <p><strong>{cita['paciente']}</strong> | DNI: {cita['dni']} | {cita['prof_nombre']}</p>
+        <p>{fecha_display} | {cita['hora_inicio']} - {cita['hora_fin']} | {cita['turno']}</p>
+    </div>
+    <div class="card"><h3>Seleccionar destino</h3>
+    <form method="GET">
+        <div class="form-row">
+            <div class="form-group"><label>Profesional destino</label>
+                <select name="dest_prof" class="form-select" required><option value="">Seleccionar</option>{prof_opts}</select>
+            </div>
+            <div class="form-group"><label>Fecha destino</label>
+                <input type="date" name="dest_fecha" class="form-input" value="{dest_fecha}" required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Buscar Cupos</button>
+    </form></div>
+    {cupos_form}'''
+    return page('Migrar Paciente', content)
+
 
 @app.route('/cita/imprimir/<int:cita_id>')
 @login_required

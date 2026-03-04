@@ -204,6 +204,7 @@ def navbar_html():
         <div class="nav-brand"><span style="font-size:1.4rem">🏥</span><span class="nav-title">SISTEMA DE CITAS</span></div>
         <div class="nav-links">
             <a href="/" class="nav-link">📅 Agenda</a>
+            <a href="/buscar" class="nav-link">🔍 Buscar</a>
             <a href="/reporte_diario" class="nav-link">📋 Reporte Diario</a>
             {admin_links}
             <a href="/reportes" class="nav-link">📊 Reportes</a>
@@ -1140,6 +1141,66 @@ def _cambiar_turno_form(prof_options, resultado=''):
     </form></div>
     {resultado}'''
 
+
+@app.route('/buscar')
+@login_required
+def buscar_paciente():
+    q = request.args.get('q', '').strip().upper()
+    resultados = ''
+    if q and len(q) >= 2:
+        conn = get_db()
+        citas = conn.execute("""SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.turno, c.paciente, c.dni,
+            c.edad, c.celular, c.estado, c.asistencia, c.tipo_paciente, c.area,
+            p.nombre as prof_nombre, p.especialidad, p.id as prof_id
+            FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+            WHERE (c.paciente LIKE ? OR c.dni LIKE ?) AND c.estado='Confirmado'
+            ORDER BY c.fecha DESC, c.hora_inicio""",
+            (f'%{q}%', f'%{q}%')).fetchall()
+        conn.close()
+
+        if citas:
+            rows = ''
+            for c in citas:
+                try:
+                    dt = datetime.strptime(c['fecha'], '%Y-%m-%d')
+                    fecha_d = f"{DIAS_ES[dt.weekday()]} {dt.day} de {MESES_ES[dt.month]}"
+                except: fecha_d = c['fecha']
+                asist_icon = '✅' if c['asistencia'] == 'Asistió' else ('❌' if c['asistencia'] == 'No asistió' else '⏳')
+                rows += f'''<tr>
+                    <td><strong>{c['paciente']}</strong><br><small>{c['dni']}</small></td>
+                    <td><strong>{fecha_d}</strong></td>
+                    <td>{c['hora_inicio']}</td>
+                    <td>{c['turno']}</td>
+                    <td>{c['area']}</td>
+                    <td>{c['prof_nombre']}</td>
+                    <td>{asist_icon} {c['asistencia']}</td>
+                    <td>
+                        <a href="/?prof_id={c['prof_id']}&fecha={c['fecha']}" class="btn btn-sm btn-primary" title="Ver en agenda">📅</a>
+                        <a href="/cita/imprimir/{c['id']}" target="_blank" class="btn btn-sm btn-secondary" title="Imprimir">🖨️</a>
+                    </td></tr>'''
+            resultados = f'''<div class="card"><h3>Se encontraron {len(citas)} cita(s)</h3>
+                <div class="table-wrapper"><table class="citas-table">
+                <thead><tr><th>Paciente</th><th>Fecha</th><th>Hora</th><th>Turno</th><th>Área</th><th>Profesional</th><th>Asistencia</th><th>Acciones</th></tr></thead>
+                <tbody>{rows}</tbody></table></div></div>'''
+        else:
+            resultados = '<div class="card"><p style="text-align:center;color:#666;padding:2rem">No se encontraron resultados para "<strong>' + q + '</strong>"</p></div>'
+
+    content = f'''<div class="page-header"><h2>🔍 Buscar Paciente</h2></div>
+    <div class="card">
+        <form method="GET">
+            <div class="form-row">
+                <div class="form-group" style="flex:3"><label>Buscar por nombre o DNI</label>
+                    <input type="text" name="q" class="form-input" value="{q}" placeholder="Escriba nombre o DNI del paciente..." autofocus>
+                </div>
+                <div class="form-group" style="flex:1;display:flex;align-items:flex-end">
+                    <button type="submit" class="btn btn-primary btn-lg" style="width:100%">🔍 Buscar</button>
+                </div>
+            </div>
+        </form>
+    </div>
+    {resultados}'''
+    flash_msgs = session.pop('_flashes', [])
+    return page('Buscar Paciente', content, flash_msgs)
 
 @app.route('/cita/editar/<int:cita_id>', methods=['GET', 'POST'])
 @login_required

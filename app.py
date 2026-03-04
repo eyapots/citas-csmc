@@ -1437,11 +1437,23 @@ def imprimir_cita(cita_id):
 @login_required
 def reporte_diario():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
+    turno_filtro = request.args.get('turno', 'TODOS')
     conn = get_db()
-    citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
-        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE c.fecha=? AND c.estado='Confirmado'
-        ORDER BY p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
+    if turno_filtro == 'MAÑANA':
+        citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
+            FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+            WHERE c.fecha=? AND c.estado='Confirmado' AND c.turno='MAÑANA'
+            ORDER BY p.orden, c.hora_inicio""", (fecha,)).fetchall()
+    elif turno_filtro == 'TARDE':
+        citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
+            FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+            WHERE c.fecha=? AND c.estado='Confirmado' AND c.turno='TARDE'
+            ORDER BY p.orden, c.hora_inicio""", (fecha,)).fetchall()
+    else:
+        citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
+            FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+            WHERE c.fecha=? AND c.estado='Confirmado'
+            ORDER BY p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
 
     try:
         dt = datetime.strptime(fecha, '%Y-%m-%d')
@@ -1476,17 +1488,27 @@ def reporte_diario():
     if not citas:
         rows = '<tr><td colspan="8" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
 
+    turno_label = 'Todos los turnos' if turno_filtro == 'TODOS' else f'Turno {turno_filtro}'
+    sel_todos = 'selected' if turno_filtro == 'TODOS' else ''
+    sel_man = 'selected' if turno_filtro == 'MAÑANA' else ''
+    sel_tar = 'selected' if turno_filtro == 'TARDE' else ''
+
     content = f'''<div class="page-header"><h2>📋 Reporte Diario - Pacientes Programados</h2>
         <p class="text-muted" style="font-size:.9rem">Para sacar historias clínicas</p></div>
     <div class="card no-print" style="padding:1rem">
         <form method="GET" class="filter-row">
             <div class="filter-group"><label>Fecha</label><input type="date" name="fecha" value="{fecha}" class="form-input"></div>
+            <div class="filter-group"><label>Turno</label><select name="turno" class="form-select">
+                <option value="TODOS" {sel_todos}>Todos</option>
+                <option value="MAÑANA" {sel_man}>☀️ Mañana</option>
+                <option value="TARDE" {sel_tar}>🌙 Tarde</option>
+            </select></div>
             <div class="filter-group" style="align-self:flex-end"><button type="submit" class="btn btn-primary">🔍 Consultar</button>
             <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimir</button></div>
         </form>
     </div>
     <div class="card">
-        <h3>📅 {fecha_display} — {len(citas)} pacientes programados</h3>
+        <h3>📅 {fecha_display} — {turno_label} — {len(citas)} pacientes</h3>
         <div class="table-wrapper"><table class="citas-table"><thead><tr>
             <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Edad</th><th>Tipo</th><th>Observaciones</th>
         </tr></thead><tbody>{rows}</tbody></table></div>

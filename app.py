@@ -196,6 +196,7 @@ def navbar_html():
     if is_admin:
         admin_links = '''
         <a href="/cambiar_turno" class="nav-link">🔄 Cambiar Turno</a>
+        <a href="/historial" class="nav-link">📜 Historial</a>
         <a href="/generar" class="nav-link">⚙️ Generar</a>
         <a href="/profesionales" class="nav-link">👥 Profesionales</a>
         <a href="/usuarios" class="nav-link">🔑 Usuarios</a>
@@ -914,6 +915,9 @@ def cambiar_turno():
                         conn.execute("DELETE FROM roles_mensuales WHERE profesional_id=? AND anio=? AND mes=? AND dia=?",
                             (prof_id, dt.year, dt.month, dt.day))
                     except: pass
+                    pac_nombres = ', '.join(p['paciente'] for p in pac_conf) if pac_conf else 'ninguno'
+                    conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+                        (0, session['user_id'], 'ELIMINAR_CUPOS', f'{prof["nombre"]} | {fecha} | {len(citas_dia)} cupos eliminados | Pacientes: {pac_nombres}'))
                     conn.commit()
                     flash(f'Cupos eliminados: {prof["nombre"]} el {fecha} ({len(citas_dia)} cupos, {len(pac_conf)} pacientes)', 'success')
                     conn.close()
@@ -1141,6 +1145,102 @@ def _cambiar_turno_form(prof_options, resultado=''):
     </form></div>
     {resultado}'''
 
+
+@app.route('/historial')
+@admin_required
+def historial():
+    fecha_desde = request.args.get('desde', (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d'))
+    fecha_hasta = request.args.get('hasta', datetime.now().strftime('%Y-%m-%d'))
+    accion_filtro = request.args.get('accion', 'TODAS')
+    usuario_filtro = request.args.get('usuario', '0')
+
+    conn = get_db()
+    query = """SELECT h.*, u.nombre as usuario_nombre, u.username
+        FROM historial h LEFT JOIN usuarios u ON u.id=h.usuario_id
+        WHERE DATE(h.fecha_hora) >= ? AND DATE(h.fecha_hora) <= ?"""
+    params = [fecha_desde, fecha_hasta]
+
+    if accion_filtro != 'TODAS':
+        query += " AND h.accion=?"
+        params.append(accion_filtro)
+    if usuario_filtro != '0':
+        query += " AND h.usuario_id=?"
+        params.append(int(usuario_filtro))
+
+    query += " ORDER BY h.fecha_hora DESC LIMIT 500"
+    registros = conn.execute(query, params).fetchall()
+    usuarios = conn.execute("SELECT id, nombre FROM usuarios ORDER BY nombre").fetchall()
+    conn.close()
+
+    rows = ''
+    for r in registros:
+        try:
+            dt = datetime.strptime(r['fecha_hora'][:19], '%Y-%m-%d %H:%M:%S')
+            fecha_h = dt.strftime('%d/%m/%Y %H:%M')
+        except:
+            fecha_h = str(r['fecha_hora'])[:16]
+
+        icon = {'AGENDAR': '📝', 'ELIMINAR': '🗑️', 'EDITAR': '✏️', 'MIGRAR': '📦',
+                'REAGENDAR': '📋', 'ASISTENCIA': '✅', 'CAMBIO_TURNO': '🔄',
+                'ELIMINAR_CUPOS': '⚠️'}.get(r['accion'], '📌')
+
+        color = {'ELIMINAR': '#c62828', 'ELIMINAR_CUPOS': '#c62828', 'CAMBIO_TURNO': '#e65100',
+                 'AGENDAR': '#2e7d32', 'EDITAR': '#1565c0', 'MIGRAR': '#6a1b9a',
+                 'REAGENDAR': '#00838f', 'ASISTENCIA': '#33691e'}.get(r['accion'], '#333')
+
+        rows += f'''<tr>
+            <td style="font-size:.8rem">{fecha_h}</td>
+            <td><strong>{r['usuario_nombre'] or r['username'] or 'Sistema'}</strong></td>
+            <td><span style="color:{color};font-weight:700">{icon} {r['accion']}</span></td>
+            <td style="font-size:.85rem">{r['detalle'] or ''}</td></tr>'''
+
+    if not registros:
+        rows = '<tr><td colspan="4" style="text-align:center;color:#666;padding:2rem">No hay registros en este período</td></tr>'
+
+    # Contadores
+    total = len(registros)
+    eliminados = sum(1 for r in registros if r['accion'] in ('ELIMINAR', 'ELIMINAR_CUPOS'))
+    agendados = sum(1 for r in registros if r['accion'] == 'AGENDAR')
+    editados = sum(1 for r in registros if r['accion'] == 'EDITAR')
+    migrados = sum(1 for r in registros if r['accion'] in ('MIGRAR', 'REAGENDAR'))
+
+    sel_todas = 'selected' if accion_filtro == 'TODAS' else ''
+    usr_opts = ''.join(f'<option value="{u["id"]}" {"selected" if str(u["id"])==usuario_filtro else ""}>{u["nombre"]}</option>' for u in usuarios)
+
+    content = f'''<div class="page-header"><h2>📜 Historial de Actividad</h2></div>
+    <div class="card no-print" style="padding:1rem">
+        <form method="GET" class="filter-row">
+            <div class="filter-group"><label>Desde</label><input type="date" name="desde" value="{fecha_desde}" class="form-input"></div>
+            <div class="filter-group"><label>Hasta</label><input type="date" name="hasta" value="{fecha_hasta}" class="form-input"></div>
+            <div class="filter-group"><label>Acción</label><select name="accion" class="form-select">
+                <option value="TODAS" {sel_todas}>Todas</option>
+                <option value="AGENDAR" {"selected" if accion_filtro=="AGENDAR" else ""}>📝 Agendar</option>
+                <option value="ELIMINAR" {"selected" if accion_filtro=="ELIMINAR" else ""}>🗑️ Eliminar</option>
+                <option value="EDITAR" {"selected" if accion_filtro=="EDITAR" else ""}>✏️ Editar</option>
+                <option value="MIGRAR" {"selected" if accion_filtro=="MIGRAR" else ""}>📦 Migrar</option>
+                <option value="REAGENDAR" {"selected" if accion_filtro=="REAGENDAR" else ""}>📋 Reagendar</option>
+                <option value="ASISTENCIA" {"selected" if accion_filtro=="ASISTENCIA" else ""}>✅ Asistencia</option>
+                <option value="CAMBIO_TURNO" {"selected" if accion_filtro=="CAMBIO_TURNO" else ""}>🔄 Cambio turno</option>
+            </select></div>
+            <div class="filter-group"><label>Usuario</label><select name="usuario" class="form-select">
+                <option value="0">Todos</option>{usr_opts}</select></div>
+            <div class="filter-group" style="align-self:flex-end"><button type="submit" class="btn btn-primary">🔍 Filtrar</button></div>
+        </form>
+    </div>
+    <div class="card" style="padding:.8rem">
+        <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+            <span style="background:#e8f5e9;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">📝 Agendados: <strong>{agendados}</strong></span>
+            <span style="background:#ffebee;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">🗑️ Eliminados: <strong>{eliminados}</strong></span>
+            <span style="background:#e3f2fd;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">✏️ Editados: <strong>{editados}</strong></span>
+            <span style="background:#f3e5f5;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">📦 Migrados: <strong>{migrados}</strong></span>
+            <span style="background:#f5f5f5;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">Total: <strong>{total}</strong></span>
+        </div>
+        <div class="table-wrapper"><table class="citas-table">
+            <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
+            <tbody>{rows}</tbody></table></div>
+    </div>'''
+    flash_msgs = session.pop('_flashes', [])
+    return page('Historial - Sistema de Citas', content, flash_msgs)
 
 @app.route('/buscar')
 @login_required

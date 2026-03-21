@@ -209,6 +209,7 @@ def navbar_html():
             <a href="/reporte_diario" class="nav-link">📋 Reporte Diario</a>
             {admin_links}
             <a href="/reportes" class="nav-link">📊 Reportes</a>
+            <a href="/inasistencias" class="nav-link">📉 Inasistencias</a>
             <a href="/exportar_form" class="nav-link">📥 Excel</a>
         </div>
         <div class="nav-user">
@@ -1911,6 +1912,254 @@ def reportes():
 # ==============================================================================
 # EXPORTAR EXCEL - CON COLORES Y FORMULARIO
 # ==============================================================================
+@app.route('/inasistencias')
+@login_required
+def inasistencias():
+    conn = get_db()
+    year = int(request.args.get('year', datetime.now().year))
+    month = int(request.args.get('month', datetime.now().month))
+    vista = request.args.get('vista', 'profesional')
+
+    ym = (str(year), f"{month:02d}")
+
+    # Ranking por profesional
+    ranking = conn.execute("""SELECT p.nombre, p.especialidad, p.color_bg, p.color_font,
+        SUM(CASE WHEN c.estado='Confirmado' THEN 1 ELSE 0 END) as total_citas,
+        SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
+        SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' THEN 1 ELSE 0 END) as pendientes
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        GROUP BY p.id ORDER BY no_asistieron DESC""", ym).fetchall()
+
+    # Detalle por día
+    por_dia = conn.execute("""SELECT c.fecha, p.nombre as prof_nombre, p.especialidad,
+        COUNT(*) as total,
+        SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        GROUP BY c.fecha, p.id
+        HAVING no_asistieron > 0
+        ORDER BY c.fecha, no_asistieron DESC""", ym).fetchall()
+
+    # Lista detallada de pacientes que no asistieron
+    no_asist = conn.execute("""SELECT c.fecha, c.hora_inicio, c.turno, c.paciente, c.dni, c.celular,
+        p.nombre as prof_nombre, p.especialidad
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió'
+        ORDER BY c.fecha DESC, p.orden, c.hora_inicio""", ym).fetchall()
+    conn.close()
+
+    # Totales generales
+    total_citas = sum(r['total_citas'] or 0 for r in ranking)
+    total_no = sum(r['no_asistieron'] or 0 for r in ranking)
+    total_si = sum(r['asistieron'] or 0 for r in ranking)
+    pct_inasis = round(total_no / total_citas * 100, 1) if total_citas else 0
+
+    # Ranking table
+    rank_rows = ''
+    for i, r in enumerate(ranking):
+        no = r['no_asistieron'] or 0
+        tot = r['total_citas'] or 0
+        pct = round(no / tot * 100, 1) if tot else 0
+        bar_color = '#c62828' if pct > 20 else ('#ff8f00' if pct > 10 else '#2e7d32')
+        medal = ['🥇','🥈','🥉'][i] if i < 3 and no > 0 else f'{i+1}'
+        rank_rows += f'''<tr>
+            <td style="text-align:center;font-size:1.1rem">{medal}</td>
+            <td><span class="prof-chip" style="background:{r['color_bg']};color:{r['color_font']}">{r['nombre']}</span></td>
+            <td>{r['especialidad']}</td>
+            <td><strong>{tot}</strong></td>
+            <td style="color:#2e7d32">{r['asistieron'] or 0}</td>
+            <td style="color:#c62828;font-weight:700;font-size:1.1rem">{no}</td>
+            <td>{r['pendientes'] or 0}</td>
+            <td><div class="progress-bar"><div class="progress-fill" style="width:{pct}%;background:{bar_color}"></div></div><small style="color:{bar_color}">{pct}%</small></td></tr>'''
+
+    # Por dia table
+    dia_rows = ''
+    for d in por_dia:
+        try:
+            dt = datetime.strptime(d['fecha'], '%Y-%m-%d')
+            fecha_d = f"{DIAS_ES[dt.weekday()][:3]} {dt.day}"
+        except: fecha_d = d['fecha']
+        dia_rows += f'<tr><td>{fecha_d}</td><td>{d["prof_nombre"]}</td><td>{d["especialidad"]}</td><td>{d["total"]}</td><td style="color:#c62828;font-weight:700">{d["no_asistieron"]}</td></tr>'
+
+    # Pacientes detalle
+    pac_rows = ''
+    for p in no_asist:
+        try:
+            dt = datetime.strptime(p['fecha'], '%Y-%m-%d')
+            fecha_d = f"{DIAS_ES[dt.weekday()][:3]} {dt.day}/{dt.month:02d}"
+        except: fecha_d = p['fecha']
+        pac_rows += f'<tr><td>{fecha_d}</td><td>{p["hora_inicio"]}</td><td>{p["turno"]}</td><td><strong>{p["paciente"]}</strong></td><td>{p["dni"]}</td><td>{p["celular"]}</td><td>{p["prof_nombre"]}</td></tr>'
+
+    month_opts = ''.join([f'<option value="{i}" {"selected" if i==month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
+
+    content = f'''<div class="page-header"><h2>📉 Reporte de Inasistencias</h2></div>
+    <div class="card no-print" style="padding:1rem"><form method="GET" class="filter-row">
+        <div class="filter-group"><label>Año</label><input type="number" name="year" value="{year}" class="form-input" min="2024" max="2030"></div>
+        <div class="filter-group"><label>Mes</label><select name="month" class="form-select">{month_opts}</select></div>
+        <div class="filter-group" style="align-self:flex-end"><button type="submit" class="btn btn-primary">🔍 Consultar</button>
+        <a href="/exportar_inasistencias?year={year}&month={month}" class="btn btn-success">📥 Excel</a>
+        <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimir</button></div>
+    </form></div>
+
+    <div class="stats-grid">
+        <div class="stat-card stat-total"><div class="stat-number">{total_citas}</div><div class="stat-label">Total Citas</div></div>
+        <div class="stat-card stat-attended"><div class="stat-number">{total_si}</div><div class="stat-label">Asistieron ✅</div></div>
+        <div class="stat-card stat-absent"><div class="stat-number">{total_no}</div><div class="stat-label">No Asistieron ❌</div></div>
+        <div class="stat-card stat-rate"><div class="stat-number" style="color:#c62828">{pct_inasis}%</div><div class="stat-label">% Inasistencia</div></div>
+    </div>
+
+    <div class="card" style="padding:1rem">
+        <h3>📊 Dashboard de Inasistencias</h3>
+        <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:1rem">
+            <div style="flex:1;min-width:300px">
+                <h4 style="font-size:.9rem;color:#666;margin-bottom:.5rem">% Inasistencia por Profesional</h4>
+                <div style="display:flex;flex-direction:column;gap:6px">'''
+
+    for r in ranking:
+        no = r['no_asistieron'] or 0
+        tot = r['total_citas'] or 0
+        pct = round(no / tot * 100, 1) if tot else 0
+        bar_w = min(pct * 3, 100)
+        bar_c = '#c62828' if pct > 20 else ('#ff8f00' if pct > 10 else '#4caf50')
+        content += f'''
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span style="font-size:.75rem;width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{r['nombre']}">{r['nombre'].split()[0]}</span>
+                        <div style="flex:1;background:#f0f0f0;border-radius:4px;height:18px;position:relative">
+                            <div style="width:{bar_w}%;background:{bar_c};height:100%;border-radius:4px;transition:width .3s"></div>
+                        </div>
+                        <span style="font-size:.8rem;font-weight:700;color:{bar_c};min-width:45px;text-align:right">{pct}%</span>
+                    </div>'''
+
+    content += f'''
+                </div>
+            </div>
+            <div style="flex:1;min-width:300px">
+                <h4 style="font-size:.9rem;color:#666;margin-bottom:.5rem">Resumen General</h4>
+                <div style="position:relative;width:180px;height:180px;margin:0 auto">
+                    <svg viewBox="0 0 36 36" style="width:100%;height:100%;transform:rotate(-90deg)">
+                        <circle cx="18" cy="18" r="15.5" fill="none" stroke="#e0e0e0" stroke-width="3"/>
+                        <circle cx="18" cy="18" r="15.5" fill="none" stroke="#4caf50" stroke-width="3"
+                            stroke-dasharray="{round((total_si/total_citas*100) if total_citas else 0, 1)} 100"/>
+                        <circle cx="18" cy="18" r="15.5" fill="none" stroke="#c62828" stroke-width="3"
+                            stroke-dasharray="{pct_inasis} 100" stroke-dashoffset="-{round((total_si/total_citas*100) if total_citas else 0, 1)}"/>
+                    </svg>
+                    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
+                        <div style="font-size:1.5rem;font-weight:700;color:#c62828">{pct_inasis}%</div>
+                        <div style="font-size:.65rem;color:#666">inasistencia</div>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:center;gap:1.5rem;margin-top:.5rem;font-size:.8rem">
+                    <span><span style="display:inline-block;width:10px;height:10px;background:#4caf50;border-radius:50%;margin-right:3px"></span>Asistieron ({total_si})</span>
+                    <span><span style="display:inline-block;width:10px;height:10px;background:#c62828;border-radius:50%;margin-right:3px"></span>No asistieron ({total_no})</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card"><h3>🏆 Ranking de Inasistencias por Profesional</h3>
+        <p style="font-size:.8rem;color:#666;margin-bottom:.5rem">Ordenado de mayor a menor inasistencia</p>
+        <div class="table-wrapper"><table class="citas-table"><thead><tr>
+            <th>#</th><th>Profesional</th><th>Especialidad</th><th>Citas</th><th>Asistieron</th><th>No Asistieron</th><th>Pendientes</th><th>% Inasistencia</th>
+        </tr></thead><tbody>{rank_rows}</tbody></table></div></div>
+
+    <div class="card"><h3>📅 Inasistencias por Día</h3>
+        <p style="font-size:.8rem;color:#666;margin-bottom:.5rem">Solo días con al menos 1 inasistencia</p>
+        <div class="table-wrapper"><table class="citas-table"><thead><tr>
+            <th>Día</th><th>Profesional</th><th>Especialidad</th><th>Citas</th><th>No Asistieron</th>
+        </tr></thead><tbody>{dia_rows if dia_rows else "<tr><td colspan='5' style='text-align:center;color:#666'>Sin inasistencias registradas</td></tr>"}</tbody></table></div></div>
+
+    <div class="card"><h3>📋 Detalle de Pacientes que No Asistieron</h3>
+        <div class="table-wrapper"><table class="citas-table"><thead><tr>
+            <th>Fecha</th><th>Hora</th><th>Turno</th><th>Paciente</th><th>DNI</th><th>Celular</th><th>Profesional</th>
+        </tr></thead><tbody>{pac_rows if pac_rows else "<tr><td colspan='7' style='text-align:center;color:#666'>Sin inasistencias registradas</td></tr>"}</tbody></table></div></div>'''
+
+    flash_msgs = session.pop('_flashes', [])
+    return page('Inasistencias - Sistema de Citas', content, flash_msgs)
+
+@app.route('/exportar_inasistencias')
+@login_required
+def exportar_inasistencias():
+    year = int(request.args.get('year', datetime.now().year))
+    month = int(request.args.get('month', datetime.now().month))
+    conn = get_db()
+    ym = (str(year), f"{month:02d}")
+
+    ranking = conn.execute("""SELECT p.nombre, p.especialidad,
+        SUM(CASE WHEN c.estado='Confirmado' THEN 1 ELSE 0 END) as total_citas,
+        SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
+        SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' THEN 1 ELSE 0 END) as pendientes
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        GROUP BY p.id ORDER BY no_asistieron DESC""", ym).fetchall()
+
+    detalle = conn.execute("""SELECT c.fecha, c.hora_inicio, c.turno, c.paciente, c.dni, c.celular,
+        p.nombre as prof_nombre, p.especialidad
+        FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió'
+        ORDER BY c.fecha, p.orden, c.hora_inicio""", ym).fetchall()
+    conn.close()
+
+    output = io.BytesIO()
+    wb = xlsxwriter.Workbook(output, {'in_memory': True})
+
+    # Hoja 1: Ranking
+    ws1 = wb.add_worksheet('RANKING')
+    fmt_h = wb.add_format({'bold': True, 'bg_color': '#c62828', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 10})
+    fmt_t = wb.add_format({'bold': True, 'font_size': 14, 'align': 'center'})
+    fmt_c = wb.add_format({'border': 1, 'font_size': 10, 'align': 'center'})
+    fmt_l = wb.add_format({'border': 1, 'font_size': 10})
+    fmt_pct = wb.add_format({'border': 1, 'font_size': 10, 'align': 'center', 'num_format': '0.0%'})
+    fmt_red = wb.add_format({'border': 1, 'font_size': 11, 'align': 'center', 'bold': True, 'font_color': '#c62828'})
+
+    ws1.merge_range(0, 0, 0, 7, f'REPORTE DE INASISTENCIAS - {MESES_ES[month].upper()} {year}', fmt_t)
+    headers1 = ['#', 'PROFESIONAL', 'ESPECIALIDAD', 'TOTAL CITAS', 'ASISTIERON', 'NO ASISTIERON', 'PENDIENTES', '% INASISTENCIA']
+    for i, h in enumerate(headers1): ws1.write(2, i, h, fmt_h)
+    for i, r in enumerate(ranking):
+        row = i + 3
+        no = r['no_asistieron'] or 0; tot = r['total_citas'] or 0
+        pct = no / tot if tot else 0
+        ws1.write(row, 0, i + 1, fmt_c)
+        ws1.write(row, 1, r['nombre'], fmt_l)
+        ws1.write(row, 2, r['especialidad'], fmt_c)
+        ws1.write(row, 3, tot, fmt_c)
+        ws1.write(row, 4, r['asistieron'] or 0, fmt_c)
+        ws1.write(row, 5, no, fmt_red)
+        ws1.write(row, 6, r['pendientes'] or 0, fmt_c)
+        ws1.write(row, 7, pct, fmt_pct)
+    ws1.set_column(0, 0, 5); ws1.set_column(1, 1, 40); ws1.set_column(2, 2, 20)
+    ws1.set_column(3, 7, 16)
+
+    # Hoja 2: Detalle pacientes
+    ws2 = wb.add_worksheet('DETALLE')
+    fmt_h2 = wb.add_format({'bold': True, 'bg_color': '#1a365d', 'font_color': 'white', 'border': 1, 'align': 'center', 'font_size': 10})
+    ws2.merge_range(0, 0, 0, 6, f'PACIENTES QUE NO ASISTIERON - {MESES_ES[month].upper()} {year}', fmt_t)
+    headers2 = ['FECHA', 'HORA', 'TURNO', 'PACIENTE', 'DNI', 'CELULAR', 'PROFESIONAL']
+    for i, h in enumerate(headers2): ws2.write(2, i, h, fmt_h2)
+    for i, d in enumerate(detalle):
+        row = i + 3
+        try:
+            dt = datetime.strptime(d['fecha'], '%Y-%m-%d')
+            fecha_d = f"{DIAS_ES[dt.weekday()]} {dt.day}/{dt.month:02d}"
+        except: fecha_d = d['fecha']
+        ws2.write(row, 0, fecha_d, fmt_c)
+        ws2.write(row, 1, d['hora_inicio'], fmt_c)
+        ws2.write(row, 2, d['turno'], fmt_c)
+        ws2.write(row, 3, d['paciente'], fmt_l)
+        ws2.write(row, 4, d['dni'], fmt_c)
+        ws2.write(row, 5, d['celular'], fmt_c)
+        ws2.write(row, 6, d['prof_nombre'], fmt_l)
+    ws2.set_column(0, 0, 15); ws2.set_column(1, 1, 8); ws2.set_column(2, 2, 10)
+    ws2.set_column(3, 3, 35); ws2.set_column(4, 4, 12); ws2.set_column(5, 5, 12); ws2.set_column(6, 6, 35)
+
+    wb.close()
+    output.seek(0)
+    return send_file(output, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True, download_name=f'inasistencias_{MESES_ES[month]}_{year}.xlsx')
+
 @app.route('/exportar_form')
 @login_required
 def exportar_form():

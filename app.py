@@ -353,6 +353,12 @@ def login_required(f):
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
             return redirect('/login')
+        conn = get_db()
+        user = conn.execute("SELECT activo FROM usuarios WHERE id=?", (session['user_id'],)).fetchone()
+        conn.close()
+        if not user or not user['activo']:
+            session.clear()
+            return redirect('/login')
         return f(*args, **kwargs)
     return decorated
 
@@ -506,7 +512,8 @@ def login():
 {error_html}
 <form method="POST" class="login-form">
 <div class="form-group"><label for="username">Usuario</label><input type="text" id="username" name="username" required autofocus placeholder="Ingrese su usuario" class="form-input"></div>
-<div class="form-group"><label for="password">Contraseña</label><input type="password" id="password" name="password" required placeholder="Ingrese su contraseña" class="form-input"></div>
+<div class="form-group"><label for="password">Contraseña</label><div style="position:relative"><input type="password" id="password" name="password" required placeholder="Ingrese su contraseña" class="form-input" style="padding-right:40px"><button type="button" id="toggle-pw" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:1.1rem">👁️</button></div></div>
+<script>document.getElementById("toggle-pw").onclick=function(){{var p=document.getElementById("password");if(p.type=="password"){{p.type="text";this.textContent="🙈"}}else{{p.type="password";this.textContent="👁️"}}}}</script>
 <button type="submit" class="btn btn-primary btn-full">Ingresar</button>
 </form>
 <div class="login-footer"><small>Usuario inicial: <b>admin</b> / Contraseña: <b>admin123</b></small></div>
@@ -595,6 +602,31 @@ function toggleSihce(id,v){
 }
 
 function toggleSihceProf(v){
+
+function toggleTipoFields(v){
+    var appDiv=document.getElementById("app-fields");
+    var adminMsg=document.getElementById("admin-msg");
+    var pacField=document.querySelector('input[name="paciente"]');
+    if(v==="APP"){
+        appDiv.style.display="block";
+        adminMsg.style.display="none";
+        pacField.required=false;
+        pacField.placeholder="Opcional para APP";
+    }else if(v==="ADMINISTRATIVA"){
+        appDiv.style.display="none";
+        adminMsg.style.display="block";
+        pacField.required=false;
+        pacField.placeholder="Opcional";
+    }else{
+        appDiv.style.display="none";
+        adminMsg.style.display="none";
+        pacField.required=true;
+        pacField.placeholder="Nombre completo";
+    }
+}
+function toggleAppManual(v){
+    document.getElementById("app-manual").style.display=(v==="OTRO")?"block":"none";
+}
     var d=document.getElementById("sihce-prof-div");
     if(v==="1"){
         d.style.display="block";
@@ -757,17 +789,23 @@ def agenda():
         <div class="form-row"><div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
         <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div></div>
-        <div class="form-row"><div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option></select></div>
+        <div class="form-row"><div class="form-group"><label>Tipo</label><select name="tipo_paciente" id="tipo-sel" class="form-select" onchange="toggleTipoFields(this.value)"><option value="NUEVO">NUEVO</option><option value="CONTINUADOR">CONTINUADOR</option><option value="APP">APP (Actividad Preventiva)</option><option value="ADMINISTRATIVA">HORA ADMINISTRATIVA</option></select></div>
         </div>
         <input type="hidden" name="sihce" value="0"><input type="hidden" name="sihce_prof_id" value="0">
-        <div class="form-group"><label>Actividad Preventivo Promocional (APP)</label><select name="actividad_app" class="form-select">
-        <option value="">— No aplica —</option><option value="VISITA DOMICILIARIA">Visita domiciliaria</option><option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
+        <div id="app-fields" style="display:none;background:#e8f5e9;padding:.75rem;border-radius:6px;border:2px solid #4caf50;margin-bottom:.5rem">
+        <div class="form-group"><label style="color:#2e7d32">Tipo de Actividad APP</label><select name="actividad_app" id="app-sel" class="form-select" onchange="toggleAppManual(this.value)">
+        <option value="">— Seleccionar —</option><option value="VISITA DOMICILIARIA">Visita domiciliaria</option><option value="SEGUIMIENTO A USUARIOS">Seguimiento a usuarios</option>
         <option value="GAM ADULTO">GAM adulto</option><option value="GAM NIÑO">GAM niño</option><option value="GAM ADICCIONES">GAM adicciones</option>
         <option value="CHARLA RADIAL">Charla radial</option><option value="CHARLA EN COMUNIDAD">Charla en comunidad</option>
+        <option value="HOGAR PROTEGIDO">Hogar protegido</option>
         <option value="REALIZACIÓN DE INFORMES">Realización de Informes</option><option value="REUNIÓN DE PERSONAL">Reunión de personal</option>
         <option value="REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA">Reunión Protocolo de Actuación Conjunta</option>
         <option value="REUNIÓN ASOCIACIÓN FAMILIARES">Reunión de la asociación de familiares</option>
-        <option value="REUNIÓN TÉCNICA COMITÉ SALUD MENTAL">Reunión Técnica Comité de Salud Mental</option></select></div>
+        <option value="REUNIÓN TÉCNICA COMITÉ SALUD MENTAL">Reunión Técnica Comité de Salud Mental</option>
+        <option value="OTRO">✏️ Otro (escribir manualmente)</option></select></div>
+        <div id="app-manual" class="form-group" style="display:none"><label style="color:#2e7d32">Describir actividad</label><input type="text" name="actividad_app_manual" class="form-input" placeholder="Escriba la actividad..."></div>
+        </div>
+        <div id="admin-msg" style="display:none;background:#fff3e0;padding:.75rem;border-radius:6px;border:2px solid #ff9800;margin-bottom:.5rem;color:#e65100;font-weight:600">📋 Se registrará como HORA ADMINISTRATIVA</div>
         <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" placeholder="Opcional"></div></div>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
         <button type="submit" class="btn btn-success">💾 Agendar</button></div></form></div></div>'''
@@ -802,7 +840,16 @@ def agendar_cita():
     sihce = int(request.form.get('sihce', 0))
     sihce_prof_id = int(request.form.get('sihce_prof_id', 0))
     actividad_app = request.form.get('actividad_app', '').strip()
-    if not paciente:
+    # Handle APP manual input
+    if actividad_app == 'OTRO':
+        actividad_app = request.form.get('actividad_app_manual', '').strip().upper()
+    # Handle ADMINISTRATIVA type
+    if tipo == 'ADMINISTRATIVA':
+        paciente = paciente or 'HORA ADMINISTRATIVA'
+        actividad_app = ''
+    elif tipo == 'APP':
+        paciente = paciente or actividad_app or 'ACTIVIDAD APP'
+    elif not paciente:
         flash('El nombre del paciente es obligatorio', 'danger')
         return redirect(request.referrer or '/')
     conn = get_db()
@@ -813,10 +860,11 @@ def agendar_cita():
         return redirect(request.referrer or '/')
     conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, sihce_prof_id=?, actividad_app=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
         (paciente, dni, edad, celular, obs, tipo, sihce, sihce_prof_id, actividad_app, session['user_id'], session['user_id'], cita_id))
+    accion = 'APP' if tipo == 'APP' else ('ADMINISTRATIVA' if tipo == 'ADMINISTRATIVA' else 'AGENDAR')
     conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
-        (cita_id, session['user_id'], 'AGENDAR', f'Paciente: {paciente} | DNI: {dni}'))
+        (cita_id, session['user_id'], accion, f'{tipo}: {paciente} | {actividad_app}' if tipo in ('APP','ADMINISTRATIVA') else f'Paciente: {paciente} | DNI: {dni}'))
     conn.commit(); conn.close()
-    flash(f'Cita agendada: {paciente}', 'success')
+    flash(f'{"Actividad APP" if tipo=="APP" else ("Hora administrativa" if tipo=="ADMINISTRATIVA" else "Cita")} registrada: {paciente}', 'success')
     return redirect(request.referrer or '/')
 
 @app.route('/cita/eliminar/<int:cita_id>', methods=['POST'])
@@ -1849,11 +1897,13 @@ def reportes():
     stats = conn.execute("""SELECT COUNT(*) as total,
         SUM(CASE WHEN estado='Confirmado' THEN 1 ELSE 0 END) as confirmados,
         SUM(CASE WHEN estado='Disponible' THEN 1 ELSE 0 END) as disponibles,
-        SUM(CASE WHEN asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
-        SUM(CASE WHEN asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
+        SUM(CASE WHEN asistencia='Asistió' AND tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN asistencia='No asistió' AND tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN tipo_paciente='NUEVO' THEN 1 ELSE 0 END) as nuevos,
         SUM(CASE WHEN tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores,
-        SUM(CASE WHEN sihce=1 THEN 1 ELSE 0 END) as sihce_total
+        SUM(CASE WHEN sihce=1 THEN 1 ELSE 0 END) as sihce_total,
+        SUM(CASE WHEN tipo_paciente='APP' THEN 1 ELSE 0 END) as total_app,
+        SUM(CASE WHEN tipo_paciente='ADMINISTRATIVA' THEN 1 ELSE 0 END) as total_admin
         FROM citas WHERE strftime('%Y',fecha)=? AND strftime('%m',fecha)=? AND turno!='ADMINISTRATIVA'""",
         (str(year), f"{month:02d}")).fetchone()
 
@@ -1885,6 +1935,8 @@ def reportes():
         <div class="stat-card stat-new"><div class="stat-number">{stats['nuevos'] or 0}</div><div class="stat-label">Nuevos</div></div>
         <div class="stat-card stat-cont"><div class="stat-number">{stats['continuadores'] or 0}</div><div class="stat-label">Continuadores</div></div>
         <div class="stat-card stat-rate"><div class="stat-number">{ocupacion}%</div><div class="stat-label">Ocupación</div></div>
+        <div class="stat-card" style="border-top:4px solid #4caf50"><div class="stat-number">{stats['total_app'] or 0}</div><div class="stat-label">Actividades APP</div></div>
+        <div class="stat-card" style="border-top:4px solid #ff9800"><div class="stat-number">{stats['total_admin'] or 0}</div><div class="stat-label">Horas Admin.</div></div>
     </div>'''
 
     prof_rows = ''

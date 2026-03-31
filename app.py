@@ -2004,13 +2004,14 @@ def inasistencias():
     ym = (str(year), f"{month:02d}")
 
     # Ranking por profesional
-    ranking = conn.execute("""SELECT p.nombre, p.especialidad, p.color_bg, p.color_font,
-        SUM(CASE WHEN c.estado='Confirmado' THEN 1 ELSE 0 END) as total_citas,
-        SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
-        SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
-        SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' THEN 1 ELSE 0 END) as pendientes
+    ranking = conn.execute("""SELECT p.nombre, p.especialidad, p.color_bg, p.color_font, p.id as prof_id,
+        SUM(CASE WHEN c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as total_citas,
+        SUM(CASE WHEN c.asistencia='Asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN c.asistencia='No asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as no_asistieron,
+        SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as pendientes,
+        SUM(CASE WHEN c.estado='Disponible' THEN 1 ELSE 0 END) as disponibles
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA'
         GROUP BY p.id ORDER BY no_asistieron DESC""", ym).fetchall()
 
     # Detalle por día
@@ -2046,6 +2047,7 @@ def inasistencias():
         pct = round(no / tot * 100, 1) if tot else 0
         bar_color = '#c62828' if pct > 20 else ('#ff8f00' if pct > 10 else '#2e7d32')
         medal = ['🥇','🥈','🥉'][i] if i < 3 and no > 0 else f'{i+1}'
+        disp = r['disponibles'] or 0
         rank_rows += f'''<tr>
             <td style="text-align:center;font-size:1.1rem">{medal}</td>
             <td><span class="prof-chip" style="background:{r['color_bg']};color:{r['color_font']}">{r['nombre']}</span></td>
@@ -2054,6 +2056,7 @@ def inasistencias():
             <td style="color:#2e7d32">{r['asistieron'] or 0}</td>
             <td style="color:#c62828;font-weight:700;font-size:1.1rem">{no}</td>
             <td>{r['pendientes'] or 0}</td>
+            <td style="color:#1565c0;font-weight:700">{disp}</td>
             <td><div class="progress-bar"><div class="progress-fill" style="width:{pct}%;background:{bar_color}"></div></div><small style="color:{bar_color}">{pct}%</small></td></tr>'''
 
     # Por dia table
@@ -2143,7 +2146,7 @@ def inasistencias():
     <div class="card"><h3>🏆 Ranking de Inasistencias por Profesional</h3>
         <p style="font-size:.8rem;color:#666;margin-bottom:.5rem">Ordenado de mayor a menor inasistencia</p>
         <div class="table-wrapper"><table class="citas-table"><thead><tr>
-            <th>#</th><th>Profesional</th><th>Especialidad</th><th>Citas</th><th>Asistieron</th><th>No Asistieron</th><th>Pendientes</th><th>% Inasistencia</th>
+            <th>#</th><th>Profesional</th><th>Especialidad</th><th>Citas</th><th>Asistieron</th><th>No Asistieron</th><th>Pendientes</th><th>Disponibles</th><th>% Inasistencia</th>
         </tr></thead><tbody>{rank_rows}</tbody></table></div></div>
 
     <div class="card"><h3>📅 Inasistencias por Día</h3>

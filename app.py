@@ -606,22 +606,23 @@ function toggleSihceProf(v){
 function toggleTipoFields(v){
     var appDiv=document.getElementById("app-fields");
     var adminMsg=document.getElementById("admin-msg");
-    var pacField=document.querySelector('input[name="paciente"]');
+    var pacField=document.getElementById("pac-input");
+    var pacReq=document.getElementById("pac-req");
     if(v==="APP"){
         appDiv.style.display="block";
         adminMsg.style.display="none";
-        pacField.required=false;
-        pacField.placeholder="Opcional para APP";
+        if(pacField){pacField.removeAttribute("required");pacField.placeholder="Opcional para APP";}
+        if(pacReq)pacReq.style.display="none";
     }else if(v==="ADMINISTRATIVA"){
         appDiv.style.display="none";
         adminMsg.style.display="block";
-        pacField.required=false;
-        pacField.placeholder="Opcional";
+        if(pacField){pacField.removeAttribute("required");pacField.placeholder="Opcional";}
+        if(pacReq)pacReq.style.display="none";
     }else{
         appDiv.style.display="none";
         adminMsg.style.display="none";
-        pacField.required=true;
-        pacField.placeholder="Nombre completo";
+        if(pacField){pacField.setAttribute("required","required");pacField.placeholder="Nombre completo";}
+        if(pacReq)pacReq.style.display="inline";
     }
 }
 function toggleAppManual(v){
@@ -785,7 +786,7 @@ def agenda():
         <div class="modal-header"><h3>➕ Agendar Cita</h3><button class="modal-close" onclick="closeModal()">×</button></div>
         <form method="POST" action="/cita/agendar"><input type="hidden" name="cita_id" id="modal-cita-id">
         <div class="modal-body"><p id="modal-hora" class="modal-hora-display"></p>
-        <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" required class="form-input" placeholder="Nombre completo"></div>
+        <div class="form-group"><label>Paciente <span id="pac-req">*</span></label><input type="text" name="paciente" id="pac-input" class="form-input" placeholder="Nombre completo"></div>
         <div class="form-row"><div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" placeholder="12345678"></div>
         <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" placeholder="25"></div>
         <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" placeholder="987654321"></div></div>
@@ -1361,12 +1362,21 @@ def editar_cita(cita_id):
     cita = dict(conn.execute("SELECT c.*, p.nombre as prof_nombre FROM citas c JOIN profesionales p ON p.id=c.profesional_id WHERE c.id=?", (cita_id,)).fetchone())
 
     if request.method == 'POST':
+        tipo = request.form.get('tipo_paciente', 'NUEVO')
+        paciente = request.form.get('paciente', '').strip().upper()
+        actividad_app = request.form.get('actividad_app', '').strip()
+        if actividad_app == 'OTRO':
+            actividad_app = request.form.get('actividad_app_manual', '').strip().upper()
+        if tipo == 'ADMINISTRATIVA':
+            paciente = paciente or 'HORA ADMINISTRATIVA'
+        elif tipo == 'APP':
+            paciente = paciente or actividad_app or 'ACTIVIDAD APP'
         conn.execute("""UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?,
             tipo_paciente=?, actividad_app=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?""",
-            (request.form.get('paciente','').strip().upper(), request.form.get('dni','').strip(),
+            (paciente, request.form.get('dni','').strip(),
              request.form.get('edad','').strip(), request.form.get('celular','').strip(),
-             request.form.get('observaciones','').strip(), request.form.get('tipo_paciente','NUEVO'),
-             request.form.get('actividad_app','').strip(), session['user_id'], cita_id))
+             request.form.get('observaciones','').strip(), tipo,
+             actividad_app, session['user_id'], cita_id))
         conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
             (cita_id, session['user_id'], 'EDITAR', f'Editado: {request.form.get("paciente","")}'))
         conn.commit(); conn.close()
@@ -1381,29 +1391,45 @@ def editar_cita(cita_id):
 
     sel_nuevo = 'selected' if cita.get('tipo_paciente') == 'NUEVO' else ''
     sel_cont = 'selected' if cita.get('tipo_paciente') == 'CONTINUADOR' else ''
+    sel_app = 'selected' if cita.get('tipo_paciente') == 'APP' else ''
+    sel_admin = 'selected' if cita.get('tipo_paciente') == 'ADMINISTRATIVA' else ''
+    app_val = cita.get('actividad_app', '')
 
     content = f'''<div class="page-header"><h2>✏️ Editar Paciente</h2></div>
     <div class="card">
         <p><strong>Profesional:</strong> {cita['prof_nombre']} | <strong>Fecha:</strong> {fecha_display} | <strong>Hora:</strong> {cita['hora_inicio']} - {cita['hora_fin']}</p>
         <form method="POST" style="margin-top:1rem">
             <div class="form-row">
-                <div class="form-group"><label>Paciente *</label><input type="text" name="paciente" class="form-input" value="{cita['paciente']}" required></div>
+                <div class="form-group"><label>Paciente</label><input type="text" name="paciente" class="form-input" value="{cita['paciente']}"></div>
                 <div class="form-group"><label>DNI</label><input type="text" name="dni" class="form-input" maxlength="8" value="{cita['dni']}"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Edad</label><input type="text" name="edad" class="form-input" maxlength="3" value="{cita.get('edad','')}"></div>
                 <div class="form-group"><label>Celular</label><input type="text" name="celular" class="form-input" maxlength="9" value="{cita['celular']}"></div>
-                <div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select"><option value="NUEVO" {sel_nuevo}>NUEVO</option><option value="CONTINUADOR" {sel_cont}>CONTINUADOR</option></select></div>
+                <div class="form-group"><label>Tipo</label><select name="tipo_paciente" class="form-select">
+                    <option value="NUEVO" {sel_nuevo}>NUEVO</option>
+                    <option value="CONTINUADOR" {sel_cont}>CONTINUADOR</option>
+                    <option value="APP" {sel_app}>APP (Actividad Preventiva)</option>
+                    <option value="ADMINISTRATIVA" {sel_admin}>HORA ADMINISTRATIVA</option>
+                </select></div>
             </div>
             <div class="form-group"><label>Observaciones</label><input type="text" name="observaciones" class="form-input" value="{cita.get('observaciones','')}"></div>
-            <div class="form-group"><label>APP</label><select name="actividad_app" class="form-select">
+            <div class="form-group"><label>Actividad APP</label><select name="actividad_app" class="form-select" onchange="document.getElementById('edit-app-manual').style.display=(this.value==='OTRO')?'block':'none'">
                 <option value="">No aplica</option>
-                <option value="VISITA DOMICILIARIA" {'selected' if cita.get('actividad_app')=='VISITA DOMICILIARIA' else ''}>Visita domiciliaria</option>
-                <option value="SEGUIMIENTO A USUARIOS" {'selected' if cita.get('actividad_app')=='SEGUIMIENTO A USUARIOS' else ''}>Seguimiento a usuarios</option>
-                <option value="GAM ADULTO" {'selected' if cita.get('actividad_app')=='GAM ADULTO' else ''}>GAM adulto</option>
-                <option value="GAM NIÑO" {'selected' if cita.get('actividad_app')=='GAM NIÑO' else ''}>GAM ni\u00f1o</option>
-                <option value="GAM ADICCIONES" {'selected' if cita.get('actividad_app')=='GAM ADICCIONES' else ''}>GAM adicciones</option>
+                <option value="VISITA DOMICILIARIA" {'selected' if app_val=='VISITA DOMICILIARIA' else ''}>Visita domiciliaria</option>
+                <option value="SEGUIMIENTO A USUARIOS" {'selected' if app_val=='SEGUIMIENTO A USUARIOS' else ''}>Seguimiento a usuarios</option>
+                <option value="GAM ADULTO" {'selected' if app_val=='GAM ADULTO' else ''}>GAM adulto</option>
+                <option value="GAM NIÑO" {'selected' if app_val=='GAM NIÑO' else ''}>GAM niño</option>
+                <option value="GAM ADICCIONES" {'selected' if app_val=='GAM ADICCIONES' else ''}>GAM adicciones</option>
+                <option value="HOGAR PROTEGIDO" {'selected' if app_val=='HOGAR PROTEGIDO' else ''}>Hogar protegido</option>
+                <option value="CHARLA RADIAL" {'selected' if app_val=='CHARLA RADIAL' else ''}>Charla radial</option>
+                <option value="CHARLA EN COMUNIDAD" {'selected' if app_val=='CHARLA EN COMUNIDAD' else ''}>Charla en comunidad</option>
+                <option value="REALIZACIÓN DE INFORMES" {'selected' if app_val=='REALIZACIÓN DE INFORMES' else ''}>Realización de Informes</option>
+                <option value="REUNIÓN DE PERSONAL" {'selected' if app_val=='REUNIÓN DE PERSONAL' else ''}>Reunión de personal</option>
+                <option value="OTRO" {'selected' if app_val and app_val not in ('VISITA DOMICILIARIA','SEGUIMIENTO A USUARIOS','GAM ADULTO','GAM NIÑO','GAM ADICCIONES','HOGAR PROTEGIDO','CHARLA RADIAL','CHARLA EN COMUNIDAD','REALIZACIÓN DE INFORMES','REUNIÓN DE PERSONAL','REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA','REUNIÓN ASOCIACIÓN FAMILIARES','REUNIÓN TÉCNICA COMITÉ SALUD MENTAL') else ''}>Otro (escribir)</option>
             </select></div>
+            <div id="edit-app-manual" class="form-group" style="display:{'block' if app_val and app_val not in ('VISITA DOMICILIARIA','SEGUIMIENTO A USUARIOS','GAM ADULTO','GAM NIÑO','GAM ADICCIONES','HOGAR PROTEGIDO','CHARLA RADIAL','CHARLA EN COMUNIDAD','REALIZACIÓN DE INFORMES','REUNIÓN DE PERSONAL','REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA','REUNIÓN ASOCIACIÓN FAMILIARES','REUNIÓN TÉCNICA COMITÉ SALUD MENTAL','') else 'none'}">
+                <label>Describir actividad</label><input type="text" name="actividad_app_manual" class="form-input" value="{app_val if app_val and app_val not in ('VISITA DOMICILIARIA','SEGUIMIENTO A USUARIOS','GAM ADULTO','GAM NIÑO','GAM ADICCIONES','HOGAR PROTEGIDO','CHARLA RADIAL','CHARLA EN COMUNIDAD','REALIZACIÓN DE INFORMES','REUNIÓN DE PERSONAL','REUNIÓN PROTOCOLO ACTUACIÓN CONJUNTA','REUNIÓN ASOCIACIÓN FAMILIARES','REUNIÓN TÉCNICA COMITÉ SALUD MENTAL') else ''}"></div>
             <div class="form-actions">
                 <button type="submit" class="btn btn-success">💾 Guardar Cambios</button>
                 <a href="/?prof_id={cita['profesional_id']}&fecha={cita['fecha']}" class="btn btn-secondary">Cancelar</a>

@@ -548,9 +548,12 @@ function renderCalendar(fechas){
         months[k].dates[f.day]={turno:f.turno,value:f.value,lleno:f.lleno||0,ocupados:f.ocupados||0,total:f.total||0};
     });
     monthKeys.sort();
-    // Auto-select current or latest month
+    // Auto-select month based on selected date or current date
     if(window._calMonthIdx===null||window._calMonthIdx===undefined){
-        var now=new Date();var curKey=now.getFullYear()+"-"+(now.getMonth()+1);
+        var selDate=document.getElementById("sel-fecha").value;
+        var curKey;
+        if(selDate){var parts=selDate.split("-");curKey=parseInt(parts[0])+"-"+parseInt(parts[1])}
+        else{var now=new Date();curKey=now.getFullYear()+"-"+(now.getMonth()+1)}
         window._calMonthIdx=monthKeys.indexOf(curKey);
         if(window._calMonthIdx<0)window._calMonthIdx=monthKeys.length-1;
     }
@@ -721,7 +724,7 @@ def api_fechas(prof_id):
 def agenda():
     conn = get_db()
     prof_id = request.args.get('prof_id', '')
-    fecha = request.args.get('fecha', '')
+    fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
     prof_options = '<option value="">— Seleccionar profesional —</option>'
     for p in profesionales:

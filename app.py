@@ -725,7 +725,7 @@ def agenda():
     conn = get_db()
     prof_id = request.args.get('prof_id', '')
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
-    profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
+    profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, orden").fetchall()
     prof_options = '<option value="">— Seleccionar profesional —</option>'
     for p in profesionales:
         sel = 'selected' if str(p['id']) == str(prof_id) else ''
@@ -933,7 +933,7 @@ def toggle_sihce(cita_id, val):
 @admin_required
 def cambiar_turno():
     conn = get_db()
-    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
+    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, orden").fetchall()
 
     resultado = ''
     if request.method == 'POST':
@@ -1466,7 +1466,7 @@ def migrar_cita(cita_id):
         return redirect('/')
     conn = get_db()
     cita = dict(conn.execute("SELECT c.*, p.nombre as prof_nombre FROM citas c JOIN profesionales p ON p.id=c.profesional_id WHERE c.id=?", (cita_id,)).fetchone())
-    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY orden").fetchall()
+    profesionales = conn.execute("SELECT id, nombre, especialidad FROM profesionales WHERE activo=1 ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, orden").fetchall()
 
     if request.method == 'POST':
         dest_id = int(request.form.get('dest_cita_id', 0))
@@ -1637,17 +1637,17 @@ def reporte_diario():
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
             FROM citas c JOIN profesionales p ON p.id=c.profesional_id
             WHERE c.fecha=? AND c.estado='Confirmado' AND c.turno='MAÑANA'
-            ORDER BY p.orden, c.hora_inicio""", (fecha,)).fetchall()
+            ORDER BY CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, p.orden, c.hora_inicio""", (fecha,)).fetchall()
     elif turno_filtro == 'TARDE':
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
             FROM citas c JOIN profesionales p ON p.id=c.profesional_id
             WHERE c.fecha=? AND c.estado='Confirmado' AND c.turno='TARDE'
-            ORDER BY p.orden, c.hora_inicio""", (fecha,)).fetchall()
+            ORDER BY CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, p.orden, c.hora_inicio""", (fecha,)).fetchall()
     else:
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.especialidad, p.color_bg, p.color_font
             FROM citas c JOIN profesionales p ON p.id=c.profesional_id
             WHERE c.fecha=? AND c.estado='Confirmado'
-            ORDER BY p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
+            ORDER BY CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, p.orden, c.turno, c.hora_inicio""", (fecha,)).fetchall()
 
     try:
         dt = datetime.strptime(fecha, '%Y-%m-%d')
@@ -1755,7 +1755,7 @@ def generar():
 @admin_required
 def profesionales():
     conn = get_db()
-    profs = conn.execute("SELECT * FROM profesionales ORDER BY orden").fetchall()
+    profs = conn.execute("SELECT * FROM profesionales ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, orden").fetchall()
     conn.close()
 
     rows = ''
@@ -1964,7 +1964,7 @@ def reportes():
         SUM(CASE WHEN c.tipo_paciente='ADMINISTRATIVA' THEN 1 ELSE 0 END) as admin_count
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA'
-        GROUP BY p.id ORDER BY p.orden""", (str(year), f"{month:02d}")).fetchall()
+        GROUP BY p.id ORDER BY CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, p.orden""", (str(year), f"{month:02d}")).fetchall()
     conn.close()
 
     month_opts = ''.join([f'<option value="{i}" {"selected" if i==month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
@@ -2293,7 +2293,7 @@ def exportar_excel():
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         LEFT JOIN usuarios u ON u.id=c.creado_por
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
-        ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, p.orden, c.hora_inicio""",
+        ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'SIHCE' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'TERAPIA DE LENGUAJE' THEN 6 ELSE 7 END, p.orden, c.hora_inicio""",
         (str(year), f"{month:02d}")).fetchall()
     conn.close()
 

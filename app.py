@@ -1921,7 +1921,7 @@ def reportes():
     month = int(request.args.get('month', datetime.now().month))
 
     stats = conn.execute("""SELECT COUNT(*) as total,
-        SUM(CASE WHEN estado='Confirmado' THEN 1 ELSE 0 END) as confirmados,
+        SUM(CASE WHEN estado='Confirmado' AND tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as confirmados,
         SUM(CASE WHEN estado='Disponible' THEN 1 ELSE 0 END) as disponibles,
         SUM(CASE WHEN asistencia='Asistió' AND tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as asistieron,
         SUM(CASE WHEN asistencia='No asistió' AND tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as no_asistieron,
@@ -1935,12 +1935,14 @@ def reportes():
 
     by_prof = conn.execute("""SELECT p.nombre, p.color_bg, p.color_font, p.especialidad,
         COUNT(*) as total,
-        SUM(CASE WHEN c.estado='Confirmado' THEN 1 ELSE 0 END) as confirmados,
-        SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
-        SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
+        SUM(CASE WHEN c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as confirmados,
+        SUM(CASE WHEN c.asistencia='Asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as asistieron,
+        SUM(CASE WHEN c.asistencia='No asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA') THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN c.tipo_paciente='NUEVO' THEN 1 ELSE 0 END) as nuevos,
         SUM(CASE WHEN c.tipo_paciente='CONTINUADOR' THEN 1 ELSE 0 END) as continuadores,
-        SUM(CASE WHEN c.sihce=1 THEN 1 ELSE 0 END) as sihce_count
+        SUM(CASE WHEN c.sihce=1 THEN 1 ELSE 0 END) as sihce_count,
+        SUM(CASE WHEN c.tipo_paciente='APP' THEN 1 ELSE 0 END) as app_count,
+        SUM(CASE WHEN c.tipo_paciente='ADMINISTRATIVA' THEN 1 ELSE 0 END) as admin_count
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA'
         GROUP BY p.id ORDER BY p.orden""", (str(year), f"{month:02d}")).fetchall()
@@ -1954,7 +1956,7 @@ def reportes():
 
     stats_html = f'''<div class="stats-grid">
         <div class="stat-card stat-total"><div class="stat-number">{total}</div><div class="stat-label">Total Cupos</div></div>
-        <div class="stat-card stat-confirmed"><div class="stat-number">{confirmados}</div><div class="stat-label">Confirmados</div></div>
+        <div class="stat-card stat-confirmed"><div class="stat-number">{confirmados}</div><div class="stat-label">Total Citas</div></div>
         <div class="stat-card stat-available"><div class="stat-number">{stats['disponibles'] or 0}</div><div class="stat-label">Disponibles</div></div>
         <div class="stat-card stat-attended"><div class="stat-number">{stats['asistieron'] or 0}</div><div class="stat-label">Asistieron ✅</div></div>
         <div class="stat-card stat-absent"><div class="stat-number">{stats['no_asistieron'] or 0}</div><div class="stat-label">No asistieron ❌</div></div>
@@ -1972,6 +1974,7 @@ def reportes():
             <td>{p['especialidad']}</td><td><strong>{p['total']}</strong></td><td>{p['confirmados'] or 0}</td>
             <td class="text-success">{p['asistieron'] or 0}</td><td class="text-danger">{p['no_asistieron'] or 0}</td>
             <td>{p['nuevos'] or 0}</td><td>{p['continuadores'] or 0}</td><td>{p['sihce_count'] or 0}</td>
+            <td style="color:#4caf50">{p['app_count'] or 0}</td><td style="color:#ff9800">{p['admin_count'] or 0}</td>
             <td><div class="progress-bar"><div class="progress-fill" style="width:{pct}%"></div></div><small>{pct}%</small></td></tr>'''
 
     content = f'''<div class="page-header"><h2>📊 Reportes y Estadísticas</h2></div>
@@ -1982,7 +1985,7 @@ def reportes():
     </form></div>
     {stats_html}
     <div class="card"><h3>📋 Por Profesional</h3><div class="table-wrapper"><table class="citas-table"><thead><tr>
-        <th>Profesional</th><th>Especialidad</th><th>Cupos</th><th>Confirmados</th><th>Asistieron</th><th>No asistieron</th><th>Nuevos</th><th>Continuadores</th><th>SIHCE</th><th>% Ocupación</th>
+        <th>Profesional</th><th>Especialidad</th><th>Cupos</th><th>Total Citas</th><th>Asistieron</th><th>No asistieron</th><th>Nuevos</th><th>Continuadores</th><th>SIHCE</th><th>APP</th><th>H.Admin</th><th>% Ocupación</th>
     </tr></thead><tbody>{prof_rows}</tbody></table></div></div>'''
     flash_msgs = session.pop('_flashes', [])
     return page('Reportes - Sistema de Citas', content, flash_msgs)
@@ -2007,7 +2010,7 @@ def inasistencias():
         SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' THEN 1 ELSE 0 END) as pendientes
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
         GROUP BY p.id ORDER BY no_asistieron DESC""", ym).fetchall()
 
     # Detalle por día
@@ -2016,7 +2019,7 @@ def inasistencias():
         SUM(CASE WHEN c.asistencia='Asistió' THEN 1 ELSE 0 END) as asistieron,
         SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
         GROUP BY c.fecha, p.id
         HAVING no_asistieron > 0
         ORDER BY c.fecha, no_asistieron DESC""", ym).fetchall()
@@ -2025,7 +2028,7 @@ def inasistencias():
     no_asist = conn.execute("""SELECT c.fecha, c.hora_inicio, c.turno, c.paciente, c.dni, c.celular,
         p.nombre as prof_nombre, p.especialidad
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió'
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
         ORDER BY c.fecha DESC, p.orden, c.hora_inicio""", ym).fetchall()
     conn.close()
 
@@ -2171,13 +2174,13 @@ def exportar_inasistencias():
         SUM(CASE WHEN c.asistencia='No asistió' THEN 1 ELSE 0 END) as no_asistieron,
         SUM(CASE WHEN c.asistencia='Pendiente' AND c.estado='Confirmado' THEN 1 ELSE 0 END) as pendientes
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado'
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.turno!='ADMINISTRATIVA' AND c.estado='Confirmado' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
         GROUP BY p.id ORDER BY no_asistieron DESC""", ym).fetchall()
 
     detalle = conn.execute("""SELECT c.fecha, c.hora_inicio, c.turno, c.paciente, c.dni, c.celular,
         p.nombre as prof_nombre, p.especialidad
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió'
+        WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=? AND c.asistencia='No asistió' AND c.tipo_paciente NOT IN ('APP','ADMINISTRATIVA')
         ORDER BY c.fecha, p.orden, c.hora_inicio""", ym).fetchall()
     conn.close()
 

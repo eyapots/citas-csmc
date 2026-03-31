@@ -534,49 +534,65 @@ function onProfChange(v){
     if(!v){document.getElementById("cal-container").innerHTML="";return}
     fetch("/api/fechas/"+v)
         .then(function(r){return r.json()})
-        .then(function(d){renderCalendar(d)})
+        .then(function(d){window._calFechas=d;window._calMonthIdx=null;renderCalendar(d)})
         .catch(function(e){console.error("Error:",e)});
 }
 
 function renderCalendar(fechas){
     var c=document.getElementById("cal-container");
     if(!fechas.length){c.innerHTML='<p style="padding:.5rem;color:#6b7280">Sin fechas programadas</p>';return}
-    var months={};
+    var months={};var monthKeys=[];
     fechas.forEach(function(f){
         var k=f.year+"-"+f.month;
-        if(!months[k])months[k]={year:f.year,month:f.month,dates:{}};
+        if(!months[k]){months[k]={year:f.year,month:f.month,dates:{}};monthKeys.push(k)}
         months[k].dates[f.day]={turno:f.turno,value:f.value,lleno:f.lleno||0,ocupados:f.ocupados||0,total:f.total||0};
     });
+    monthKeys.sort();
+    // Auto-select current or latest month
+    if(window._calMonthIdx===null||window._calMonthIdx===undefined){
+        var now=new Date();var curKey=now.getFullYear()+"-"+(now.getMonth()+1);
+        window._calMonthIdx=monthKeys.indexOf(curKey);
+        if(window._calMonthIdx<0)window._calMonthIdx=monthKeys.length-1;
+    }
+    if(window._calMonthIdx<0)window._calMonthIdx=0;
+    if(window._calMonthIdx>=monthKeys.length)window._calMonthIdx=monthKeys.length-1;
+    window._calMonthKeys=monthKeys;
+
     var meses=["","Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
     var dias=["L","M","X","J","V","S","D"];
     var html="";
     var selF=document.getElementById("sel-fecha").value;
-    Object.values(months).forEach(function(m){
-        html+='<div style="margin-bottom:.5rem"><strong style="font-size:.85rem">'+meses[m.month]+' '+m.year+'</strong>';
-        html+='<div class="cal-grid">';
-        dias.forEach(function(d){html+='<div class="cal-header">'+d+'</div>'});
-        var fd=new Date(m.year,m.month-1,1).getDay();
-        fd=fd===0?6:fd-1;
-        for(var i=0;i<fd;i++)html+='<div class="cal-day empty"></div>';
-        var dm=new Date(m.year,m.month,0).getDate();
-        for(var d=1;d<=dm;d++){
-            var info=m.dates[d];
-            if(info){
-                var cls="turno-"+info.turno.toLowerCase();
-                var sel=info.value===selF?" selected":"";
-                var lleno_s=info.lleno?'border:2px solid #c62828;box-shadow:0 0 4px #c62828':'';
-                var badge=info.lleno?'<span style="position:absolute;top:-3px;right:-3px;background:#c62828;color:#fff;border-radius:50%;width:15px;height:15px;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:bold">!</span>':'<span style="position:absolute;bottom:0;right:1px;font-size:7px;opacity:.6;color:#333">'+info.ocupados+'/'+info.total+'</span>';
-                html+='<div class="cal-day '+cls+sel+'" style="position:relative;'+lleno_s+'" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+(info.lleno?' - LLENO':' - '+info.ocupados+'/'+info.total)+'">'+d+badge+'</div>';
-            }else{
-                html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
-            }
+
+    // Month navigation
+    var mk=monthKeys[window._calMonthIdx];
+    var m=months[mk];
+    var prevBtn=window._calMonthIdx>0?'<button onclick="calPrevMonth()" style="background:none;border:1px solid #ccc;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:1rem">◀</button>':'<span style="width:30px"></span>';
+    var nextBtn=window._calMonthIdx<monthKeys.length-1?'<button onclick="calNextMonth()" style="background:none;border:1px solid #ccc;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:1rem">▶</button>':'<span style="width:30px"></span>';
+    html+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">'+prevBtn+'<strong style="font-size:.9rem">'+meses[m.month]+' '+m.year+'</strong>'+nextBtn+'</div>';
+    html+='<div class="cal-grid">';
+    dias.forEach(function(d){html+='<div class="cal-header">'+d+'</div>'});
+    var fd=new Date(m.year,m.month-1,1).getDay();
+    fd=fd===0?6:fd-1;
+    for(var i=0;i<fd;i++)html+='<div class="cal-day empty"></div>';
+    var dm=new Date(m.year,m.month,0).getDate();
+    for(var d=1;d<=dm;d++){
+        var info=m.dates[d];
+        if(info){
+            var cls="turno-"+info.turno.toLowerCase();
+            var sel=info.value===selF?" selected":"";
+            var lleno_s=info.lleno?'border:2px solid #c62828;box-shadow:0 0 4px #c62828':'';
+            var badge=info.lleno?'<span style="position:absolute;top:-3px;right:-3px;background:#c62828;color:#fff;border-radius:50%;width:15px;height:15px;font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:bold">!</span>':'<span style="position:absolute;bottom:0;right:1px;font-size:7px;opacity:.6;color:#333">'+info.ocupados+'/'+info.total+'</span>';
+            html+='<div class="cal-day '+cls+sel+'" style="position:relative;'+lleno_s+'" onclick="selectDate('+String.fromCharCode(39)+info.value+String.fromCharCode(39)+')" title="'+info.turno+(info.lleno?' - LLENO':' - '+info.ocupados+'/'+info.total)+'">'+d+badge+'</div>';
+        }else{
+            html+='<div class="cal-day empty" style="color:#ccc;cursor:default">'+d+'</div>';
         }
-        html+='</div>';
-        html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span><span><span style="display:inline-block;width:10px;height:10px;border:2px solid #c62828;border-radius:50%;margin-right:3px"></span> Lleno</span><span style="font-size:.7rem;color:#666">N/T = ocupados/total</span></div>';
-        html+='</div>';
-    });
+    }
+    html+='</div>';
+    html+='<div class="cal-legend"><span><span class="cal-legend-dot" style="background:#1565c0"></span> MT/GD</span><span><span class="cal-legend-dot" style="background:#ff8f00"></span> M</span><span><span class="cal-legend-dot" style="background:#2e7d32"></span> T</span><span><span style="display:inline-block;width:10px;height:10px;border:2px solid #c62828;border-radius:50%;margin-right:3px"></span> Lleno</span><span style="font-size:.7rem;color:#666">N/T = ocupados/total</span></div>';
     c.innerHTML=html;
 }
+function calPrevMonth(){window._calMonthIdx--;renderCalendar(window._calFechas)}
+function calNextMonth(){window._calMonthIdx++;renderCalendar(window._calFechas)}
 
 function selectDate(f){
     var p=document.getElementById("sel-prof").value;

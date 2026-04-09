@@ -960,15 +960,16 @@ def unir_turnos():
         if not fecha_destino:
             fecha_destino = fecha_m if cual_m == 'fecha_m' else fecha_t
 
-        # Get patients from source dates
+        # Get ALL slots from source dates (including empty ones, respecting position)
         src_m = fecha_m if cual_m == 'fecha_m' else fecha_t
         src_t = fecha_t if cual_m == 'fecha_m' else fecha_m
 
-        pac_manana = [dict(c) for c in conn.execute(
-            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno='MAÑANA' AND estado='Confirmado' ORDER BY hora_inicio",
+        # Get all slots that are not ADMINISTRATIVA, in order
+        all_slots_m = [dict(c) for c in conn.execute(
+            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno!='ADMINISTRATIVA' ORDER BY hora_inicio",
             (prof_id, src_m)).fetchall()]
-        pac_tarde = [dict(c) for c in conn.execute(
-            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno='TARDE' AND estado='Confirmado' ORDER BY hora_inicio",
+        all_slots_t = [dict(c) for c in conn.execute(
+            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno!='ADMINISTRATIVA' ORDER BY hora_inicio",
             (prof_id, src_t)).fetchall()]
 
         # Generate MT slots for destination
@@ -984,10 +985,15 @@ def unir_turnos():
             new_m = _make_slots("07:30", 7, 45, 'MAÑANA')
             new_t = _make_slots("13:45", 6, 45, 'TARDE')
 
-        overflow_m = pac_manana[len(new_m):] if len(pac_manana) > len(new_m) else []
-        overflow_t = pac_tarde[len(new_t):] if len(pac_tarde) > len(new_t) else []
-        pac_manana = pac_manana[:len(new_m)]
-        pac_tarde = pac_tarde[:len(new_t)]
+        # Map source slots to new slots position by position (respecting gaps)
+        overflow_m = all_slots_m[len(new_m):] if len(all_slots_m) > len(new_m) else []
+        overflow_t = all_slots_t[len(new_t):] if len(all_slots_t) > len(new_t) else []
+        slots_for_m = all_slots_m[:len(new_m)]
+        slots_for_t = all_slots_t[:len(new_t)]
+
+        # Count actual patients (for preview)
+        pac_manana = [s for s in slots_for_m if s['estado'] == 'Confirmado']
+        pac_tarde = [s for s in slots_for_t if s['estado'] == 'Confirmado']
 
         if not confirmar:
             try:
@@ -1047,27 +1053,25 @@ def unir_turnos():
                     (prof_id, dt_d.year, dt_d.month, dt_d.day, 'MT'))
             except: pass
 
-            # Insert morning slots with patients
-            all_slots = new_m + new_t
-            pac_idx_m = 0; pac_idx_t = 0
-            for slot in all_slots:
+            # Insert slots: position by position from source to destination
+            all_new = new_m + new_t
+            idx_m = 0; idx_t = 0
+            for slot in all_new:
                 pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'
                 tipo=''; app_act=''; asist='Pendiente'; sihce=0; sihce_pid=0; creado=None; modif=None
 
-                if slot['turno'] == 'MAÑANA' and pac_idx_m < len(pac_manana):
-                    p = pac_manana[pac_idx_m]; pac_idx_m += 1
-                    pac=p['paciente']; dni=p['dni']; edad=p.get('edad','')
-                    cel=p['celular']; obs=p.get('observaciones',''); estado='Confirmado'
-                    tipo=p.get('tipo_paciente',''); app_act=p.get('actividad_app','')
-                    asist=p.get('asistencia','Pendiente'); sihce=p.get('sihce',0)
-                    sihce_pid=p.get('sihce_prof_id',0); creado=p.get('creado_por'); modif=p.get('modificado_por')
-                elif slot['turno'] == 'TARDE' and pac_idx_t < len(pac_tarde):
-                    p = pac_tarde[pac_idx_t]; pac_idx_t += 1
-                    pac=p['paciente']; dni=p['dni']; edad=p.get('edad','')
-                    cel=p['celular']; obs=p.get('observaciones',''); estado='Confirmado'
-                    tipo=p.get('tipo_paciente',''); app_act=p.get('actividad_app','')
-                    asist=p.get('asistencia','Pendiente'); sihce=p.get('sihce',0)
-                    sihce_pid=p.get('sihce_prof_id',0); creado=p.get('creado_por'); modif=p.get('modificado_por')
+                src = None
+                if slot['turno'] == 'MAÑANA' and idx_m < len(slots_for_m):
+                    src = slots_for_m[idx_m]; idx_m += 1
+                elif slot['turno'] == 'TARDE' and idx_t < len(slots_for_t):
+                    src = slots_for_t[idx_t]; idx_t += 1
+
+                if src and src['estado'] == 'Confirmado':
+                    pac=src['paciente']; dni=src['dni']; edad=src.get('edad','')
+                    cel=src['celular']; obs=src.get('observaciones',''); estado='Confirmado'
+                    tipo=src.get('tipo_paciente',''); app_act=src.get('actividad_app','')
+                    asist=src.get('asistencia','Pendiente'); sihce=src.get('sihce',0)
+                    sihce_pid=src.get('sihce_prof_id',0); creado=src.get('creado_por'); modif=src.get('modificado_por')
 
                 conn.execute("""INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,
                     paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,

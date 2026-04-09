@@ -196,6 +196,7 @@ def navbar_html():
     if is_admin:
         admin_links = '''
         <a href="/cambiar_turno" class="nav-link">🔄 Cambiar Turno</a>
+        <a href="/unir_turnos" class="nav-link">🔗 Unir Turnos</a>
         <a href="/historial" class="nav-link">📜 Historial</a>
         <a href="/generar" class="nav-link">⚙️ Generar</a>
         <a href="/profesionales" class="nav-link">👥 Profesionales</a>
@@ -929,6 +930,194 @@ def toggle_sihce(cita_id, val):
 # ==============================================================================
 # REPORTE DIARIO - Pacientes programados por día
 # ==============================================================================
+@app.route('/unir_turnos', methods=['GET', 'POST'])
+@admin_required
+def unir_turnos():
+    conn = get_db()
+    profesionales = conn.execute("""SELECT * FROM profesionales WHERE activo=1 
+        ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'PSICOLOGÍA' THEN 3 WHEN 'TERAPIA DE LENGUAJE' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'SIHCE' THEN 6 ELSE 7 END, orden""").fetchall()
+    resultado = ''
+
+    if request.method == 'POST':
+        prof_id = int(request.form.get('prof_id', 0))
+        fecha_m = request.form.get('fecha_m', '')
+        fecha_t = request.form.get('fecha_t', '')
+        fecha_destino = request.form.get('fecha_destino', '')
+        cual_m = request.form.get('cual_m', 'fecha_m')  # which date provides MAÑANA
+        confirmar = request.form.get('confirmar', '')
+
+        if not prof_id or not fecha_m or not fecha_t:
+            flash('Complete todos los campos', 'danger')
+            conn.close()
+            return redirect('/unir_turnos')
+
+        prof = conn.execute("SELECT * FROM profesionales WHERE id=?", (prof_id,)).fetchone()
+        if not prof:
+            flash('Profesional no encontrado', 'danger')
+            conn.close()
+            return redirect('/unir_turnos')
+
+        if not fecha_destino:
+            fecha_destino = fecha_m if cual_m == 'fecha_m' else fecha_t
+
+        # Get patients from source dates
+        src_m = fecha_m if cual_m == 'fecha_m' else fecha_t
+        src_t = fecha_t if cual_m == 'fecha_m' else fecha_m
+
+        pac_manana = [dict(c) for c in conn.execute(
+            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno='MAÑANA' AND estado='Confirmado' ORDER BY hora_inicio",
+            (prof_id, src_m)).fetchall()]
+        pac_tarde = [dict(c) for c in conn.execute(
+            "SELECT * FROM citas WHERE profesional_id=? AND fecha=? AND turno='TARDE' AND estado='Confirmado' ORDER BY hora_inicio",
+            (prof_id, src_t)).fetchall()]
+
+        # Generate MT slots for destination
+        is_med = prof['especialidad'] in ('MEDICINA', 'PSIQUIATRÍA', 'SIHCE')
+        is_to = prof['especialidad'] == 'TERAPIA OCUPACIONAL'
+        if is_to:
+            new_m = _make_slots("07:30", 7, 45, 'MAÑANA')
+            new_t = _make_slots("13:45", 6, 45, 'TARDE')
+        elif is_med:
+            new_m = _make_slots("07:30", 8, 40, 'MAÑANA')
+            new_t = _make_slots("14:00", 7, 40, 'TARDE')
+        else:
+            new_m = _make_slots("07:30", 7, 45, 'MAÑANA')
+            new_t = _make_slots("13:45", 6, 45, 'TARDE')
+
+        overflow_m = pac_manana[len(new_m):] if len(pac_manana) > len(new_m) else []
+        overflow_t = pac_tarde[len(new_t):] if len(pac_tarde) > len(new_t) else []
+        pac_manana = pac_manana[:len(new_m)]
+        pac_tarde = pac_tarde[:len(new_t)]
+
+        if not confirmar:
+            try:
+                dt_m = datetime.strptime(src_m, '%Y-%m-%d')
+                dt_t = datetime.strptime(src_t, '%Y-%m-%d')
+                dt_d = datetime.strptime(fecha_destino, '%Y-%m-%d')
+                fm = f"{DIAS_ES[dt_m.weekday()]} {dt_m.day} de {MESES_ES[dt_m.month]}"
+                ft = f"{DIAS_ES[dt_t.weekday()]} {dt_t.day} de {MESES_ES[dt_t.month]}"
+                fd = f"{DIAS_ES[dt_d.weekday()]} {dt_d.day} de {MESES_ES[dt_d.month]}"
+            except:
+                fm = src_m; ft = src_t; fd = fecha_destino
+
+            preview_m = ''.join(f'<tr><td>{p["paciente"]}</td><td>{p["hora_inicio"]}</td></tr>' for p in pac_manana)
+            preview_t = ''.join(f'<tr><td>{p["paciente"]}</td><td>{p["hora_inicio"]}</td></tr>' for p in pac_tarde)
+            warning = ''
+            if overflow_m or overflow_t:
+                warning = f'<div class="flash flash-danger">⚠️ {len(overflow_m)+len(overflow_t)} paciente(s) no caben en el turno MT</div>'
+
+            resultado = f'''<div class="card" style="border:2px solid #1565c0">
+                <h3>📋 Vista previa de unión</h3>
+                <p><strong>Profesional:</strong> {prof["nombre"]}</p>
+                <p><strong>MAÑANA desde:</strong> {fm} ({len(pac_manana)} pacientes → {len(new_m)} cupos)</p>
+                <p><strong>TARDE desde:</strong> {ft} ({len(pac_tarde)} pacientes → {len(new_t)} cupos)</p>
+                <p><strong>Fecha destino:</strong> {fd} (turno MT)</p>
+                {warning}
+                <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:.5rem">
+                    <div style="flex:1;min-width:200px"><h4>☀️ Mañana ({len(pac_manana)})</h4>
+                        <table class="citas-table"><tbody>{preview_m or '<tr><td>Sin pacientes</td></tr>'}</tbody></table></div>
+                    <div style="flex:1;min-width:200px"><h4>🌙 Tarde ({len(pac_tarde)})</h4>
+                        <table class="citas-table"><tbody>{preview_t or '<tr><td>Sin pacientes</td></tr>'}</tbody></table></div>
+                </div>
+                <form method="POST" style="margin-top:1rem">
+                    <input type="hidden" name="prof_id" value="{prof_id}">
+                    <input type="hidden" name="fecha_m" value="{fecha_m}">
+                    <input type="hidden" name="fecha_t" value="{fecha_t}">
+                    <input type="hidden" name="fecha_destino" value="{fecha_destino}">
+                    <input type="hidden" name="cual_m" value="{cual_m}">
+                    <input type="hidden" name="confirmar" value="1">
+                    <button type="submit" class="btn btn-success btn-lg" onclick="return confirm('¿Confirmar unión de turnos?')">✅ Confirmar Unión</button>
+                    <a href="/unir_turnos" class="btn btn-secondary btn-lg">❌ Cancelar</a>
+                </form></div>'''
+        else:
+            # Execute: delete both source dates and create MT at destination
+            fechas_a_borrar = set([fecha_m, fecha_t, fecha_destino])
+            for f in fechas_a_borrar:
+                conn.execute("DELETE FROM citas WHERE profesional_id=? AND fecha=?", (prof_id, f))
+                try:
+                    dt = datetime.strptime(f, '%Y-%m-%d')
+                    conn.execute("DELETE FROM roles_mensuales WHERE profesional_id=? AND anio=? AND mes=? AND dia=?",
+                        (prof_id, dt.year, dt.month, dt.day))
+                except: pass
+
+            # Update role for destination
+            try:
+                dt_d = datetime.strptime(fecha_destino, '%Y-%m-%d')
+                conn.execute("INSERT OR REPLACE INTO roles_mensuales (profesional_id, anio, mes, dia, turno) VALUES (?,?,?,?,?)",
+                    (prof_id, dt_d.year, dt_d.month, dt_d.day, 'MT'))
+            except: pass
+
+            # Insert morning slots with patients
+            all_slots = new_m + new_t
+            pac_idx_m = 0; pac_idx_t = 0
+            for slot in all_slots:
+                pac=''; dni=''; edad=''; cel=''; obs=''; estado='Disponible'
+                tipo=''; app_act=''; asist='Pendiente'; sihce=0; sihce_pid=0; creado=None; modif=None
+
+                if slot['turno'] == 'MAÑANA' and pac_idx_m < len(pac_manana):
+                    p = pac_manana[pac_idx_m]; pac_idx_m += 1
+                    pac=p['paciente']; dni=p['dni']; edad=p.get('edad','')
+                    cel=p['celular']; obs=p.get('observaciones',''); estado='Confirmado'
+                    tipo=p.get('tipo_paciente',''); app_act=p.get('actividad_app','')
+                    asist=p.get('asistencia','Pendiente'); sihce=p.get('sihce',0)
+                    sihce_pid=p.get('sihce_prof_id',0); creado=p.get('creado_por'); modif=p.get('modificado_por')
+                elif slot['turno'] == 'TARDE' and pac_idx_t < len(pac_tarde):
+                    p = pac_tarde[pac_idx_t]; pac_idx_t += 1
+                    pac=p['paciente']; dni=p['dni']; edad=p.get('edad','')
+                    cel=p['celular']; obs=p.get('observaciones',''); estado='Confirmado'
+                    tipo=p.get('tipo_paciente',''); app_act=p.get('actividad_app','')
+                    asist=p.get('asistencia','Pendiente'); sihce=p.get('sihce',0)
+                    sihce_pid=p.get('sihce_prof_id',0); creado=p.get('creado_por'); modif=p.get('modificado_por')
+
+                conn.execute("""INSERT INTO citas (profesional_id,fecha,hora_inicio,hora_fin,turno,area,
+                    paciente,dni,edad,celular,observaciones,estado,tipo_paciente,actividad_app,
+                    asistencia,sihce,sihce_prof_id,creado_por,modificado_por,modificado_en)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+                    (prof_id, fecha_destino, slot['inicio'], slot['fin'], slot['turno'], prof['especialidad'],
+                     pac, dni, edad, cel, obs, estado, tipo, app_act, asist, sihce, sihce_pid, creado, modif))
+
+            conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
+                (0, session['user_id'], 'UNIR_TURNOS', f'{prof["nombre"]} | M:{src_m} + T:{src_t} → MT:{fecha_destino} | {len(pac_manana)}M+{len(pac_tarde)}T'))
+            conn.commit()
+            flash(f'Turnos unidos: {prof["nombre"]} → MT en {fecha_destino}. {len(pac_manana)} mañana + {len(pac_tarde)} tarde trasladados.', 'success')
+            conn.close()
+            return redirect('/unir_turnos')
+
+    conn.close()
+    prof_opts = ''.join(f'<option value="{p["id"]}">{p["nombre"]} ({p["especialidad"]})</option>' for p in profesionales)
+    content = f'''<div class="page-header"><h2>🔗 Unir Turnos</h2></div>
+    <div class="card"><h3>Combinar turno M + turno T en un solo día MT</h3>
+    <form method="POST">
+        <div class="form-row">
+            <div class="form-group"><label>Profesional</label>
+                <select name="prof_id" class="form-select" required><option value="">— Seleccionar —</option>{prof_opts}</select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Fecha del turno 1</label>
+                <input type="date" name="fecha_m" class="form-input" required>
+            </div>
+            <div class="form-group"><label>Fecha del turno 2</label>
+                <input type="date" name="fecha_t" class="form-input" required>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>¿Cuál será MAÑANA?</label>
+                <select name="cual_m" class="form-select">
+                    <option value="fecha_m">Turno 1 = Mañana</option>
+                    <option value="fecha_t">Turno 2 = Mañana</option>
+                </select>
+            </div>
+            <div class="form-group"><label>Fecha destino (donde se unen)</label>
+                <input type="date" name="fecha_destino" class="form-input" placeholder="Dejar vacío = fecha del turno mañana">
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-lg">🔍 Ver Vista Previa</button>
+    </form></div>
+    {resultado}'''
+    flash_msgs = session.pop('_flashes', [])
+    return page('Unir Turnos - Sistema de Citas', content, flash_msgs)
+
 @app.route('/cambiar_turno', methods=['GET', 'POST'])
 @admin_required
 def cambiar_turno():
@@ -1315,16 +1504,28 @@ def historial():
 @login_required
 def buscar_paciente():
     q = request.args.get('q', '').strip().upper()
+    mes = request.args.get('mes', '0')
+    anio = request.args.get('anio', str(datetime.now().year))
     resultados = ''
     if q and len(q) >= 2:
         conn = get_db()
-        citas = conn.execute("""SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.turno, c.paciente, c.dni,
-            c.edad, c.celular, c.estado, c.asistencia, c.tipo_paciente, c.area,
-            p.nombre as prof_nombre, p.especialidad, p.id as prof_id
-            FROM citas c JOIN profesionales p ON p.id=c.profesional_id
-            WHERE (c.paciente LIKE ? OR c.dni LIKE ?) AND c.estado='Confirmado'
-            ORDER BY c.fecha DESC, c.hora_inicio""",
-            (f'%{q}%', f'%{q}%')).fetchall()
+        if mes != '0':
+            citas = conn.execute("""SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.turno, c.paciente, c.dni,
+                c.edad, c.celular, c.estado, c.asistencia, c.tipo_paciente, c.area,
+                p.nombre as prof_nombre, p.especialidad, p.id as prof_id
+                FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+                WHERE (c.paciente LIKE ? OR c.dni LIKE ?) AND c.estado='Confirmado'
+                AND strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
+                ORDER BY c.fecha DESC, c.hora_inicio""",
+                (f'%{q}%', f'%{q}%', anio, f"{int(mes):02d}")).fetchall()
+        else:
+            citas = conn.execute("""SELECT c.id, c.fecha, c.hora_inicio, c.hora_fin, c.turno, c.paciente, c.dni,
+                c.edad, c.celular, c.estado, c.asistencia, c.tipo_paciente, c.area,
+                p.nombre as prof_nombre, p.especialidad, p.id as prof_id
+                FROM citas c JOIN profesionales p ON p.id=c.profesional_id
+                WHERE (c.paciente LIKE ? OR c.dni LIKE ?) AND c.estado='Confirmado'
+                ORDER BY c.fecha DESC, c.hora_inicio""",
+                (f'%{q}%', f'%{q}%')).fetchall()
         conn.close()
 
         if citas:
@@ -1347,12 +1548,15 @@ def buscar_paciente():
                         <a href="/?prof_id={c['prof_id']}&fecha={c['fecha']}" class="btn btn-sm btn-primary" title="Ver en agenda">📅</a>
                         <a href="/cita/imprimir/{c['id']}" target="_blank" class="btn btn-sm btn-secondary" title="Imprimir">🖨️</a>
                     </td></tr>'''
-            resultados = f'''<div class="card"><h3>Se encontraron {len(citas)} cita(s)</h3>
+            mes_label = f' en {MESES_ES[int(mes)]} {anio}' if mes != '0' else ''
+            resultados = f'''<div class="card"><h3>Se encontraron {len(citas)} cita(s){mes_label}</h3>
                 <div class="table-wrapper"><table class="citas-table">
                 <thead><tr><th>Paciente</th><th>Fecha</th><th>Hora</th><th>Turno</th><th>Área</th><th>Profesional</th><th>Asistencia</th><th>Acciones</th></tr></thead>
                 <tbody>{rows}</tbody></table></div></div>'''
         else:
             resultados = '<div class="card"><p style="text-align:center;color:#666;padding:2rem">No se encontraron resultados para "<strong>' + q + '</strong>"</p></div>'
+
+    month_opts = f'<option value="0">Todos los meses</option>' + ''.join([f'<option value="{i}" {"selected" if mes==str(i) else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
 
     content = f'''<div class="page-header"><h2>🔍 Buscar Paciente</h2></div>
     <div class="card">
@@ -1360,6 +1564,12 @@ def buscar_paciente():
             <div class="form-row">
                 <div class="form-group" style="flex:3"><label>Buscar por nombre o DNI</label>
                     <input type="text" name="q" class="form-input" value="{q}" placeholder="Escriba nombre o DNI del paciente..." autofocus>
+                </div>
+                <div class="form-group" style="flex:1"><label>Mes</label>
+                    <select name="mes" class="form-select">{month_opts}</select>
+                </div>
+                <div class="form-group" style="flex:1"><label>Año</label>
+                    <input type="number" name="anio" class="form-input" value="{anio}" min="2024" max="2030">
                 </div>
                 <div class="form-group" style="flex:1;display:flex;align-items:flex-end">
                     <button type="submit" class="btn btn-primary btn-lg" style="width:100%">🔍 Buscar</button>

@@ -111,6 +111,7 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .citas-table td{padding:.5rem .75rem;border-bottom:1px solid var(--border);vertical-align:middle}
 .cita-row{transition:background .1s}.cita-row:hover{background:#f8fafc}
 .row-disponible{border-left:4px solid var(--accent-light)}
+.row-app{border-left:4px solid #c62828;background:#ffebee !important}
 .row-inactive{opacity:.5}
 .td-hora{font-family:monospace;font-size:.82rem;white-space:nowrap}
 .paciente-nombre{font-weight:600}
@@ -728,9 +729,11 @@ def agenda():
     fecha = request.args.get('fecha', datetime.now().strftime('%Y-%m-%d'))
     profesionales = conn.execute("SELECT * FROM profesionales WHERE activo=1 ORDER BY CASE especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'MEDICINA' THEN 2 WHEN 'PSICOLOGÍA' THEN 3 WHEN 'TERAPIA DE LENGUAJE' THEN 4 WHEN 'TERAPIA OCUPACIONAL' THEN 5 WHEN 'SIHCE' THEN 6 ELSE 7 END, orden").fetchall()
     prof_options = '<option value="">— Seleccionar profesional —</option>'
+    esp_colors = {'PSIQUIATRÍA':'#e8eaf6','MEDICINA':'#e3f2fd','PSICOLOGÍA':'#fff8e1','TERAPIA DE LENGUAJE':'#e8f5e9','TERAPIA OCUPACIONAL':'#fce4ec','SIHCE':'#f3e5f5'}
     for p in profesionales:
         sel = 'selected' if str(p['id']) == str(prof_id) else ''
-        prof_options += f'<option value="{p["id"]}" {sel}>{p["nombre"]} ({p["especialidad"]})</option>'
+        bg = esp_colors.get(p['especialidad'], '#f5f5f5')
+        prof_options += f'<option value="{p["id"]}" {sel} style="background:{bg};padding:4px">{p["nombre"]} ({p["especialidad"]})</option>'
     citas_html = ''
     if prof_id and fecha:
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.color_bg, p.color_font
@@ -757,7 +760,8 @@ def agenda():
                 if c['turno'] == 'ADMINISTRATIVA':
                     citas_html += f'<tr class="cita-row" style="background:#fff3e0;border-left:4px solid #ff9800"><td>ADM</td><td class="td-hora"><strong>{c["hora_inicio"]} - {c["hora_fin"]}</strong></td><td colspan="7"><em style="color:#e65100">📋 Hora Administrativa</em></td></tr>'
                     continue
-                rc = 'row-ocupado' if c['estado'] == 'Confirmado' else 'row-disponible'
+                tp = c['tipo_paciente'] if c['tipo_paciente'] else ''
+                rc = 'row-app' if tp in ('APP','ADMINISTRATIVA') and c['estado'] == 'Confirmado' else ('row-ocupado' if c['estado'] == 'Confirmado' else 'row-disponible')
                 st = f'border-left:4px solid {c["color_bg"]};' if c['estado'] == 'Confirmado' else ''
                 if c['estado'] == 'Confirmado':
                     pc = f'<span class="paciente-nombre">{c["paciente"]}</span>'

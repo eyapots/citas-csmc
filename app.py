@@ -1423,8 +1423,12 @@ def historial():
     usuario_filtro = request.args.get('usuario', '0')
 
     conn = get_db()
-    query = """SELECT h.*, u.nombre as usuario_nombre, u.username
-        FROM historial h LEFT JOIN usuarios u ON u.id=h.usuario_id
+    query = """SELECT h.*, u.nombre as usuario_nombre, u.username,
+        p.nombre as prof_nombre, c.fecha as cita_fecha, c.hora_inicio, c.paciente
+        FROM historial h 
+        LEFT JOIN usuarios u ON u.id=h.usuario_id
+        LEFT JOIN citas c ON c.id=h.cita_id
+        LEFT JOIN profesionales p ON p.id=c.profesional_id
         WHERE DATE(h.fecha_hora) >= ? AND DATE(h.fecha_hora) <= ?"""
     params = [fecha_desde, fecha_hasta]
 
@@ -1458,14 +1462,30 @@ def historial():
                  'AGENDAR': '#2e7d32', 'EDITAR': '#1565c0', 'MIGRAR': '#6a1b9a',
                  'REAGENDAR': '#00838f', 'ASISTENCIA': '#33691e'}.get(r['accion'], '#333')
 
+        # Build context info: professional + date + patient
+        prof_info = ''
+        if r['prof_nombre']:
+            prof_info = f'<strong style="color:#1565c0">{r["prof_nombre"]}</strong>'
+            if r['cita_fecha']:
+                try:
+                    dt_c = datetime.strptime(r['cita_fecha'], '%Y-%m-%d')
+                    prof_info += f'<br><small style="color:#666">{DIAS_ES[dt_c.weekday()][:3]} {dt_c.day}/{dt_c.month:02d} {r["hora_inicio"] or ""}</small>'
+                except: pass
+        elif r['accion'] in ('CAMBIO_TURNO', 'ELIMINAR_CUPOS', 'UNIR_TURNOS'):
+            # Extract professional from detalle
+            detalle = r['detalle'] or ''
+            if '|' in detalle:
+                prof_info = f'<small style="color:#666">{detalle.split("|")[0].strip()}</small>'
+
         rows += f'''<tr>
             <td style="font-size:.8rem">{fecha_h}</td>
             <td><strong>{r['usuario_nombre'] or r['username'] or 'Sistema'}</strong></td>
             <td><span style="color:{color};font-weight:700">{icon} {r['accion']}</span></td>
+            <td>{prof_info}</td>
             <td style="font-size:.85rem">{r['detalle'] or ''}</td></tr>'''
 
     if not registros:
-        rows = '<tr><td colspan="4" style="text-align:center;color:#666;padding:2rem">No hay registros en este período</td></tr>'
+        rows = '<tr><td colspan="5" style="text-align:center;color:#666;padding:2rem">No hay registros en este período</td></tr>'
 
     # Contadores
     total = len(registros)
@@ -1506,7 +1526,7 @@ def historial():
             <span style="background:#f5f5f5;padding:.3rem .8rem;border-radius:4px;font-size:.85rem">Total: <strong>{total}</strong></span>
         </div>
         <div class="table-wrapper"><table class="citas-table">
-            <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Acción</th><th>Detalle</th></tr></thead>
+            <thead><tr><th>Fecha/Hora</th><th>Usuario</th><th>Acción</th><th>Profesional / Cita</th><th>Detalle</th></tr></thead>
             <tbody>{rows}</tbody></table></div>
     </div>'''
     flash_msgs = session.pop('_flashes', [])

@@ -1442,6 +1442,8 @@ def historial():
     for r in registros:
         try:
             dt = datetime.strptime(r['fecha_hora'][:19], '%Y-%m-%d %H:%M:%S')
+            # Convert UTC to Peru time (UTC-5)
+            dt = dt - timedelta(hours=5)
             fecha_h = dt.strftime('%d/%m/%Y %H:%M')
         except:
             fecha_h = str(r['fecha_hora'])[:16]
@@ -1880,25 +1882,34 @@ def reporte_diario():
             current_prof = c['prof_nombre']
             num = 0
             rows += f'''<tr style="background:{c['color_bg']};color:{c['color_font']}">
-                <td colspan="7" style="padding:.6rem;font-weight:700">{c['prof_nombre']} — {c['especialidad']}</td></tr>'''
+                <td colspan="9" style="padding:.6rem;font-weight:700">{c['prof_nombre']} — {c['especialidad']}</td></tr>'''
         num += 1
         sihce_tag = ''
         if c['sihce']:
             sihce_tag = ' <span class="sihce-tag">SIHCE</span>'
-            sp_id = c.get('sihce_prof_id', 0) or 0
+            sp_id = c['sihce_prof_id'] if c['sihce_prof_id'] else 0
             if sp_id:
                 sp = conn.execute("SELECT nombre FROM profesionales WHERE id=?", (sp_id,)).fetchone()
                 if sp: sihce_tag += f' <small style="color:#e65100">🔗 {sp["nombre"]}</small>'
         app_tag = f'<br><small style="color:#e65100">APP: {c["actividad_app"]}</small>' if c['actividad_app'] else ''
+        # Asistencia buttons (same as agenda)
+        asist = c['asistencia'] or 'Pendiente'
+        asist_si_active = 'background:#2e7d32;color:#fff' if asist == 'Asistió' else ''
+        asist_no_active = 'background:#c62828;color:#fff' if asist == 'No asistió' else ''
+        asist_html = f'''<div style="display:flex;gap:2px">
+            <button onclick="markAsist({c['id']},'Asistió')" class="btn-asist" style="{asist_si_active}" title="Asistió">✅</button>
+            <button onclick="markAsist({c['id']},'No asistió')" class="btn-asist" style="{asist_no_active}" title="No asistió">❌</button>
+        </div>'''
         rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
             <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
             <td><strong>{c['paciente']}</strong>{sihce_tag}{app_tag}</td><td>{c['dni']}</td><td>{c['edad']}</td>
             <td><span class="badge {'badge-new' if c['tipo_paciente']=='NUEVO' else 'badge-cont'}">{c['tipo_paciente']}</span></td>
-            <td>{c['observaciones']}</td></tr>'''
+            <td>{c['observaciones']}</td>
+            <td>{asist_html}</td></tr>'''
 
     conn.close()
     if not citas:
-        rows = '<tr><td colspan="8" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
+        rows = '<tr><td colspan="9" class="text-center">No hay pacientes programados para esta fecha</td></tr>'
 
     turno_label = 'Todos los turnos' if turno_filtro == 'TODOS' else f'Turno {turno_filtro}'
     sel_todos = 'selected' if turno_filtro == 'TODOS' else ''
@@ -1922,9 +1933,16 @@ def reporte_diario():
     <div class="card">
         <h3>📅 {fecha_display} — {turno_label} — {len(citas)} pacientes</h3>
         <div class="table-wrapper"><table class="citas-table"><thead><tr>
-            <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Edad</th><th>Tipo</th><th>Observaciones</th>
+            <th>#</th><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Edad</th><th>Tipo</th><th>Observaciones</th><th class="no-print">Asistencia</th>
         </tr></thead><tbody>{rows}</tbody></table></div>
-    </div>'''
+    </div>
+    <script>
+    function markAsist(id, val){{
+        fetch('/cita/asistencia/'+id+'/'+encodeURIComponent(val), {{method:'POST'}})
+            .then(function(r){{if(r.ok)location.reload()}})
+            .catch(function(e){{alert('Error: '+e)}});
+    }}
+    </script>'''
     flash_msgs = session.pop('_flashes', [])
     return page('Reporte Diario - Sistema de Citas', content, flash_msgs)
 

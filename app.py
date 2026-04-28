@@ -614,8 +614,10 @@ function closeModal(){
     document.getElementById("modal-agendar").style.display="none";
 }
 
-function marcarAsistencia(id,e){
-    fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(e),{method:"POST"}).then(function(){location.reload()});
+function marcarAsistencia(id,e,btn){
+    var isActive=btn&&(btn.classList.contains("btn-asist-active")||btn.classList.contains("btn-asist-no-active"));
+    var current=isActive?"Pendiente":e;
+    fetch("/cita/asistencia/"+id+"/"+encodeURIComponent(current),{method:"POST"}).then(function(){location.reload()});
 }
 
 function toggleSihce(id,v){
@@ -790,7 +792,7 @@ def agenda():
                 if c['estado'] == 'Confirmado':
                     aa = 'btn-asist-active' if c['asistencia'] == 'Asistió' else ''
                     na = 'btn-asist-no-active' if c['asistencia'] == 'No asistió' else ''
-                    ah = f'<div class="asistencia-btns"><button class="btn-asist {aa}" onclick="marcarAsistencia({c["id"]},\'Asistió\')" title="Asistió">✅</button><button class="btn-asist {na}" onclick="marcarAsistencia({c["id"]},\'No asistió\')" title="No asistió">❌</button></div>'
+                    ah = f'<div class="asistencia-btns"><button class="btn-asist {aa}" onclick="marcarAsistencia({c["id"]},\'Asistió\',this)" title="Asistió (clic para desmarcar)">✅</button><button class="btn-asist {na}" onclick="marcarAsistencia({c["id"]},\'No asistió\',this)" title="No asistió (clic para desmarcar)">❌</button></div>'
                 if c['estado'] == 'Disponible':
                     he = c["hora_inicio"] + " - " + c["hora_fin"]
                     act = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{he}\')">➕ Agendar</button>'
@@ -1894,11 +1896,11 @@ def reporte_diario():
         app_tag = f'<br><small style="color:#e65100">APP: {c["actividad_app"]}</small>' if c['actividad_app'] else ''
         # Asistencia buttons (same as agenda)
         asist = c['asistencia'] or 'Pendiente'
-        asist_si_active = 'background:#2e7d32;color:#fff' if asist == 'Asistió' else ''
-        asist_no_active = 'background:#c62828;color:#fff' if asist == 'No asistió' else ''
+        si_active = 'btn-asist-active' if asist == 'Asistió' else ''
+        no_active = 'btn-asist-no-active' if asist == 'No asistió' else ''
         asist_html = f'''<div style="display:flex;gap:2px">
-            <button onclick="markAsist({c['id']},'Asistió')" class="btn-asist" style="{asist_si_active}" title="Asistió">✅</button>
-            <button onclick="markAsist({c['id']},'No asistió')" class="btn-asist" style="{asist_no_active}" title="No asistió">❌</button>
+            <button onclick="markAsist({c['id']},'Asistió',this)" class="btn-asist {si_active}" title="Asistió (clic para desmarcar)">✅</button>
+            <button onclick="markAsist({c['id']},'No asistió',this)" class="btn-asist {no_active}" title="No asistió (clic para desmarcar)">❌</button>
         </div>'''
         rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
             <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
@@ -1937,8 +1939,10 @@ def reporte_diario():
         </tr></thead><tbody>{rows}</tbody></table></div>
     </div>
     <script>
-    function markAsist(id, val){{
-        fetch('/cita/asistencia/'+id+'/'+encodeURIComponent(val), {{method:'POST'}})
+    function markAsist(id, val, btn){{
+        var isActive=btn&&(btn.classList.contains('btn-asist-active')||btn.classList.contains('btn-asist-no-active'));
+        var current=isActive?'Pendiente':val;
+        fetch('/cita/asistencia/'+id+'/'+encodeURIComponent(current), {{method:'POST'}})
             .then(function(r){{if(r.ok)location.reload()}})
             .catch(function(e){{alert('Error: '+e)}});
     }}

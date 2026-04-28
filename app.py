@@ -1922,7 +1922,10 @@ def reporte_diario():
             <button onclick="markAsist({c['id']},'Asistió',this)" class="btn-asist {si_active}" title="Asistió (clic para desmarcar)">✅</button>
             <button onclick="markAsist({c['id']},'No asistió',this)" class="btn-asist {no_active}" title="No asistió (clic para desmarcar)">❌</button>
         </div>'''
-        rows += f'''<tr><td>{num}</td><td>{c['turno']}</td>
+        # Red row for APP/ADMINISTRATIVA (same as agenda)
+        tp = c['tipo_paciente'] if c['tipo_paciente'] else ''
+        row_cls = 'row-app' if tp in ('APP','ADMINISTRATIVA') else ''
+        rows += f'''<tr class="{row_cls}"><td>{num}</td><td>{c['turno']}</td>
             <td class="td-hora">{c['hora_inicio']} - {c['hora_fin']}</td>
             <td><strong>{c['paciente']}</strong>{sihce_tag}{app_tag}</td><td>{c['dni']}</td><td>{c['edad']}</td>
             <td><span class="badge {'badge-new' if c['tipo_paciente']=='NUEVO' else 'badge-cont'}">{c['tipo_paciente']}</span></td>

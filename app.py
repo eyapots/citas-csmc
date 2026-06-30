@@ -952,7 +952,7 @@ def agendar_cita():
         flash('Cupo no disponible', 'warning')
         conn.close()
         return redirect(request.referrer or '/')
-    conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, sihce_prof_id=?, actividad_app=?, creado_por=?, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
+    conn.execute("UPDATE citas SET paciente=?, dni=?, edad=?, celular=?, observaciones=?, estado='Confirmado', tipo_paciente=?, sihce=?, sihce_prof_id=?, actividad_app=?, creado_por=?, creado_en=CURRENT_TIMESTAMP, modificado_por=?, modificado_en=CURRENT_TIMESTAMP WHERE id=?",
         (paciente, dni, edad, celular, obs, tipo, sihce, sihce_prof_id, actividad_app, session['user_id'], session['user_id'], cita_id))
     accion = 'APP' if tipo == 'APP' else ('ADMINISTRATIVA' if tipo == 'ADMINISTRATIVA' else 'AGENDAR')
     conn.execute("INSERT INTO historial (cita_id, usuario_id, accion, detalle) VALUES (?,?,?,?)",
@@ -2715,10 +2715,10 @@ def exportar_excel():
         ws.write(r, 13, row.get('actividad_app', ''), fl)
         ws.write(r, 14, row.get('asistencia', ''), fc)
         ws.write(r, 15, 'SIHCE' if row['sihce'] else '', fc)
-        ws.write(r, 16, row.get('registrado_por', '') or '', fl)
-        # Fecha de registro (convertir UTC a hora Perú)
+        ws.write(r, 16, (row.get('registrado_por', '') or '') if row.get('estado') == 'Confirmado' else '', fl)
+        # Fecha de registro (solo para citas confirmadas, convertir UTC a hora Perú)
         fecha_reg = ''
-        if row.get('creado_en'):
+        if row.get('estado') == 'Confirmado' and row.get('creado_en'):
             try:
                 dt_reg = datetime.strptime(str(row['creado_en'])[:19], '%Y-%m-%d %H:%M:%S') - timedelta(hours=5)
                 fecha_reg = dt_reg.strftime('%d/%m/%Y %H:%M')

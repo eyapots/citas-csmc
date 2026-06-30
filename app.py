@@ -124,8 +124,11 @@ table.citas-table{width:100%;border-collapse:collapse;font-size:.85rem}
 .asistencia-btns{display:flex;gap:.25rem}
 .btn-asist{width:30px;height:30px;border:1.5px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:.85rem;display:flex;align-items:center;justify-content:center;transition:all .15s}
 .btn-asist:hover{transform:scale(1.1)}
-.btn-asist-active{border-color:var(--accent);background:#f0fff4;box-shadow:0 0 0 2px rgba(46,125,50,.2)}
-.btn-asist-no-active{border-color:var(--danger);background:#fff5f5;box-shadow:0 0 0 2px rgba(198,40,40,.2)}
+.btn-asist-active{border-color:var(--accent);background:#43a047;box-shadow:0 0 0 3px rgba(67,160,71,.35);transform:scale(1.05)}
+.btn-asist-no-active{border-color:var(--danger);background:#e53935;box-shadow:0 0 0 3px rgba(229,57,53,.35);transform:scale(1.05)}
+.asistencia-btns.pendiente{padding:3px 5px;border-radius:6px;background:#fff3e0;box-shadow:0 0 0 2px #ff9800;animation:pulse-asist 1.6s ease-in-out infinite}
+@keyframes pulse-asist{0%,100%{box-shadow:0 0 0 2px #ff9800}50%{box-shadow:0 0 0 4px rgba(255,152,0,.5)}}
+@keyframes bannerPulse{0%,100%{box-shadow:0 3px 10px rgba(245,124,0,.4)}50%{box-shadow:0 3px 18px rgba(245,124,0,.7)}}
 .prof-chip{display:inline-block;padding:.2rem .6rem;border-radius:4px;font-size:.78rem;font-weight:600;white-space:nowrap}
 .color-swatch{display:inline-flex;align-items:center;justify-content:center;width:40px;height:28px;border-radius:4px;font-weight:700;font-size:.8rem;border:1px solid rgba(0,0,0,.1)}
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:.75rem;margin-bottom:1.25rem}
@@ -193,6 +196,7 @@ def navbar_html():
     if 'user_id' not in session:
         return ''
     is_admin = session.get('user_rol') == 'admin'
+    is_lector = session.get('user_rol') == 'lector'
     admin_links = ''
     if is_admin:
         admin_links = '''
@@ -203,6 +207,7 @@ def navbar_html():
         <a href="/profesionales" class="nav-link">👥 Profesionales</a>
         <a href="/usuarios" class="nav-link">🔑 Usuarios</a>
         '''
+    excel_link = '' if is_lector else '<a href="/exportar_form" class="nav-link">📥 Excel</a>'
     return f'''<nav class="navbar">
         <div class="nav-brand"><span style="font-size:1.4rem">🏥</span><span class="nav-title">SISTEMA DE CITAS</span></div>
         <div class="nav-links">
@@ -212,7 +217,7 @@ def navbar_html():
             {admin_links}
             <a href="/reportes" class="nav-link">📊 Reportes</a>
             <a href="/inasistencias" class="nav-link">📉 Inasistencias</a>
-            <a href="/exportar_form" class="nav-link">📥 Excel</a>
+            {excel_link}
         </div>
         <div class="nav-user">
             <span class="user-badge">{session.get('user_nombre','')}</span>
@@ -220,17 +225,52 @@ def navbar_html():
         </div>
     </nav>'''
 
-def page(title, content, flash_msgs=None):
+def page(title, content, flash_msgs=None, show_asist_banner=False):
     flashes = ''
     if flash_msgs:
         flashes = '<div class="flash-container">'
         for cat, msg in flash_msgs:
             flashes += f'<div class="flash flash-{cat}">{msg}<button class="flash-close" onclick="this.parentElement.remove()">×</button></div>'
         flashes += '</div>'
+    # Banner de recordatorio de asistencia (solo agenda y reporte diario, no lectores)
+    banner = ''
+    if show_asist_banner and session.get('user_rol') != 'lector':
+        banner = '''<div id="asist-banner" style="display:none;background:linear-gradient(90deg,#ff9800,#f57c00);color:#fff;padding:1rem 1.25rem;border-radius:10px;margin-bottom:1rem;box-shadow:0 3px 10px rgba(245,124,0,.4);align-items:center;gap:1rem;animation:bannerPulse 2s ease-in-out infinite">
+            <span style="font-size:2rem;line-height:1">⏰</span>
+            <div style="flex:1">
+                <div style="font-size:1.15rem;font-weight:800;letter-spacing:.3px">¡RECUERDE MARCAR LA ASISTENCIA!</div>
+                <div style="font-size:.95rem;opacity:.95;margin-top:2px">Marque la asistencia de los usuarios cada 2 horas para mantener el registro actualizado.</div>
+            </div>
+            <button onclick="cerrarAsistBanner()" style="background:rgba(255,255,255,.25);border:none;color:#fff;width:36px;height:36px;border-radius:50%;font-size:1.4rem;cursor:pointer;font-weight:bold;line-height:1;flex-shrink:0" title="Cerrar">×</button>
+        </div>
+        <script>
+        function cerrarAsistBanner(){
+            document.getElementById("asist-banner").style.display="none";
+            try{sessionStorage.setItem("asistBannerCerrado", Date.now().toString());}catch(e){}
+        }
+        (function(){
+            var banner=document.getElementById("asist-banner");
+            if(!banner)return;
+            var cerrado=null;
+            try{cerrado=sessionStorage.getItem("asistBannerCerrado");}catch(e){}
+            var dosHoras=2*60*60*1000;
+            var mostrar=true;
+            if(cerrado){
+                var transcurrido=Date.now()-parseInt(cerrado);
+                if(transcurrido<dosHoras)mostrar=false;
+            }
+            if(mostrar)banner.style.display="flex";
+            // Reaparecer automáticamente cada 2 horas
+            setInterval(function(){
+                banner.style.display="flex";
+                try{sessionStorage.removeItem("asistBannerCerrado");}catch(e){}
+            }, dosHoras);
+        })();
+        </script>'''
     return f'''<!DOCTYPE html>
 <html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>{title}</title><style>{CSS}</style></head>
-<body>{navbar_html()}<main class="container">{flashes}{content}</main>
+<body>{navbar_html()}<main class="container">{flashes}{banner}{content}</main>
 <script>document.querySelectorAll('.flash').forEach(el=>setTimeout(()=>{{el.style.opacity='0';setTimeout(()=>el.remove(),300)}},5000));</script>
 </body></html>'''
 
@@ -442,7 +482,11 @@ def generate_slots(conn, year, month, roster_text=None):
                 elif shift == 'T':
                     slots_to_create.extend(_make_slots("14:00", 10, 30, 'TARDE'))
                 elif shift in ('MT', 'GD'):
-                    slots_to_create.extend(_make_slots("07:30", 10, 33, 'MAÑANA'))
+                    # 9 pacientes mañana + última hora administrativa + 10 tarde
+                    m_slots = _make_slots("07:30", 10, 33, 'MAÑANA')
+                    last = m_slots.pop()
+                    slots_to_create.extend(m_slots)
+                    slots_to_create.append({'inicio': last['inicio'], 'fin': last['fin'], 'turno': 'ADMINISTRATIVA'})
                     slots_to_create.extend(_make_slots("14:00", 10, 30, 'TARDE'))
             elif is_to:
                 # TERAPIA OCUPACIONAL: 45 min, M sin hora admin pero con 1 paciente en tarde
@@ -452,7 +496,11 @@ def generate_slots(conn, year, month, roster_text=None):
                 elif shift in ('T',):
                     slots_to_create.extend(_make_slots("13:30", 6, 45, 'TARDE'))
                 elif shift in ('MT', 'GD'):
-                    slots_to_create.extend(_make_slots("07:30", 7, 45, 'MAÑANA'))
+                    # 6 pacientes mañana + última hora administrativa + 6 tarde
+                    m_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
+                    last = m_slots.pop()
+                    slots_to_create.extend(m_slots)
+                    slots_to_create.append({'inicio': last['inicio'], 'fin': last['fin'], 'turno': 'ADMINISTRATIVA'})
                     slots_to_create.extend(_make_slots("13:45", 6, 45, 'TARDE'))
             elif is_med:
                 # MÉDICO/PSIQUIATRA: 40 min por cita
@@ -464,8 +512,11 @@ def generate_slots(conn, year, month, roster_text=None):
                     # Solo tarde: inicia 13:30, 6 citas
                     slots_to_create.extend(_make_slots("13:30", 6, 40, 'TARDE'))
                 elif shift in ('MT', 'GD'):
-                    # MT y GD mismo horario: mañana 8 + tarde 7
-                    slots_to_create.extend(_make_slots("07:30", 8, 40, 'MAÑANA'))
+                    # MT y GD: mañana 7 + última hora administrativa + tarde 7
+                    m_slots = _make_slots("07:30", 8, 40, 'MAÑANA')
+                    last = m_slots.pop()
+                    slots_to_create.extend(m_slots)
+                    slots_to_create.append({'inicio': last['inicio'], 'fin': last['fin'], 'turno': 'ADMINISTRATIVA'})
                     slots_to_create.extend(_make_slots("14:00", 7, 40, 'TARDE'))
             else:
                 # PSICÓLOGO y otros: 45 min por cita
@@ -477,8 +528,11 @@ def generate_slots(conn, year, month, roster_text=None):
                     # Solo tarde: inicia 13:30 para acabar ~18:00, 6 citas
                     slots_to_create.extend(_make_slots("13:30", 6, 45, 'TARDE'))
                 elif shift in ('MT', 'GD'):
-                    # MT y GD mismo horario: mañana 7 + tarde 6
-                    slots_to_create.extend(_make_slots("07:30", 7, 45, 'MAÑANA'))
+                    # MT y GD: mañana 6 + última hora administrativa + tarde 6
+                    m_slots = _make_slots("07:30", 7, 45, 'MAÑANA')
+                    last = m_slots.pop()
+                    slots_to_create.extend(m_slots)
+                    slots_to_create.append({'inicio': last['inicio'], 'fin': last['fin'], 'turno': 'ADMINISTRATIVA'})
                     slots_to_create.extend(_make_slots("13:45", 6, 45, 'TARDE'))
             prev_appointments = existing.get((prof_data['nombre'], date_str), [])
             prev_by_order = sorted(prev_appointments, key=lambda x: x['hora_inicio'])
@@ -802,7 +856,8 @@ def agenda():
                 if c['estado'] == 'Confirmado':
                     aa = 'btn-asist-active' if c['asistencia'] == 'Asistió' else ''
                     na = 'btn-asist-no-active' if c['asistencia'] == 'No asistió' else ''
-                    ah = f'<div class="asistencia-btns"><button class="btn-asist {aa}" onclick="marcarAsistencia({c["id"]},\'Asistió\',this)" title="Asistió (clic para desmarcar)">✅</button><button class="btn-asist {na}" onclick="marcarAsistencia({c["id"]},\'No asistió\',this)" title="No asistió (clic para desmarcar)">❌</button></div>'
+                    pend = 'pendiente' if c['asistencia'] not in ('Asistió', 'No asistió') and c['tipo_paciente'] not in ('APP', 'ADMINISTRATIVA') else ''
+                    ah = f'<div class="asistencia-btns {pend}"><button class="btn-asist {aa}" onclick="marcarAsistencia({c["id"]},\'Asistió\',this)" title="Asistió (clic para desmarcar)">✅</button><button class="btn-asist {na}" onclick="marcarAsistencia({c["id"]},\'No asistió\',this)" title="No asistió (clic para desmarcar)">❌</button></div>'
                 if c['estado'] == 'Disponible':
                     he = c["hora_inicio"] + " - " + c["hora_fin"]
                     act = f'<button class="btn btn-sm btn-success" onclick="openModal({c["id"]},\'{he}\')">➕ Agendar</button>'
@@ -852,7 +907,7 @@ def agenda():
         <div class="filter-group"><label>Fecha</label><div id="cal-container"></div><input type="hidden" id="sel-fecha" value="{fecha}"></div>
     </div></div>{citas_html}{modal_html}''' + CALENDAR_JS + init_js
     flash_msgs = session.pop('_flashes', [])
-    return page('Agenda - Sistema de Citas', content, flash_msgs)
+    return page('Agenda - Sistema de Citas', content, flash_msgs, show_asist_banner=True)
 
 
     flash_msgs = session.pop('_flashes', [])
@@ -1941,7 +1996,9 @@ def reporte_diario():
         asist = c['asistencia'] or 'Pendiente'
         si_active = 'btn-asist-active' if asist == 'Asistió' else ''
         no_active = 'btn-asist-no-active' if asist == 'No asistió' else ''
-        asist_html = f'''<div style="display:flex;gap:2px">
+        tp_pend = c['tipo_paciente'] if c['tipo_paciente'] else ''
+        pend_rd = 'pendiente' if asist not in ('Asistió', 'No asistió') and tp_pend not in ('APP', 'ADMINISTRATIVA') else ''
+        asist_html = f'''<div class="asistencia-btns {pend_rd}" style="display:flex;gap:2px;width:fit-content">
             <button onclick="markAsist({c['id']},'Asistió',this)" class="btn-asist {si_active}" title="Asistió (clic para desmarcar)">✅</button>
             <button onclick="markAsist({c['id']},'No asistió',this)" class="btn-asist {no_active}" title="No asistió (clic para desmarcar)">❌</button>
         </div>'''
@@ -1994,7 +2051,7 @@ def reporte_diario():
     }}
     </script>'''
     flash_msgs = session.pop('_flashes', [])
-    return page('Reporte Diario - Sistema de Citas', content, flash_msgs)
+    return page('Reporte Diario - Sistema de Citas', content, flash_msgs, show_asist_banner=True)
 
 # ==============================================================================
 # GENERAR CALENDARIO
@@ -2383,13 +2440,14 @@ def inasistencias():
         pac_rows += f'<tr><td>{fecha_d}</td><td>{p["hora_inicio"]}</td><td>{p["turno"]}</td><td><strong>{p["paciente"]}</strong></td><td>{p["dni"]}</td><td>{p["celular"]}</td><td>{p["prof_nombre"]}</td></tr>'
 
     month_opts = ''.join([f'<option value="{i}" {"selected" if i==month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
+    excel_btn_inasist = '' if session.get('user_rol') == 'lector' else f'<a href="/exportar_inasistencias?year={year}&month={month}" class="btn btn-success">📥 Excel</a>'
 
     content = f'''<div class="page-header"><h2>📉 Reporte de Inasistencias</h2></div>
     <div class="card no-print" style="padding:1rem"><form method="GET" class="filter-row">
         <div class="filter-group"><label>Año</label><input type="number" name="year" value="{year}" class="form-input" min="2024" max="2030"></div>
         <div class="filter-group"><label>Mes</label><select name="month" class="form-select">{month_opts}</select></div>
         <div class="filter-group" style="align-self:flex-end"><button type="submit" class="btn btn-primary">🔍 Consultar</button>
-        <a href="/exportar_inasistencias?year={year}&month={month}" class="btn btn-success">📥 Excel</a>
+        {excel_btn_inasist}
         <button type="button" class="btn btn-secondary" onclick="window.print()">🖨️ Imprimir</button></div>
     </form></div>
 
@@ -2471,6 +2529,9 @@ def inasistencias():
 @app.route('/exportar_inasistencias')
 @login_required
 def exportar_inasistencias():
+    if session.get('user_rol') == 'lector':
+        flash('No tiene permisos para exportar (cuenta de solo lectura)', 'danger')
+        return redirect('/')
     year = int(request.args.get('year', datetime.now().year))
     month = int(request.args.get('month', datetime.now().month))
     conn = get_db()
@@ -2552,6 +2613,9 @@ def exportar_inasistencias():
 @app.route('/exportar_form')
 @login_required
 def exportar_form():
+    if session.get('user_rol') == 'lector':
+        flash('No tiene permisos para exportar (cuenta de solo lectura)', 'danger')
+        return redirect('/')
     month_opts = ''.join([f'<option value="{i}" {"selected" if i==datetime.now().month else ""}>{MESES_ES[i]}</option>' for i in range(1, 13)])
     content = f'''<div class="page-header"><h2>📥 Exportar a Excel</h2></div>
     <div class="card">
@@ -2569,6 +2633,9 @@ def exportar_form():
 @app.route('/exportar')
 @login_required
 def exportar_excel():
+    if session.get('user_rol') == 'lector':
+        flash('No tiene permisos para exportar (cuenta de solo lectura)', 'danger')
+        return redirect('/')
     year = int(request.args.get('year', datetime.now().year))
     month = int(request.args.get('month', datetime.now().month))
     conn = get_db()

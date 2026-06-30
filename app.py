@@ -805,7 +805,7 @@ def agenda():
         citas = conn.execute("""SELECT c.*, p.nombre as prof_nombre, p.color_bg, p.color_font
             FROM citas c JOIN profesionales p ON p.id=c.profesional_id
             WHERE c.profesional_id=? AND c.fecha=? ORDER BY
-            CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END,
+            CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'ADMINISTRATIVA' THEN 2 WHEN 'TARDE' THEN 3 END,
             c.hora_inicio""", (prof_id, fecha)).fetchall()
         if citas:
             try:
@@ -819,8 +819,10 @@ def agenda():
             citas_html += '<div class="table-wrapper"><table class="citas-table"><thead><tr><th>Turno</th><th>Hora</th><th>Paciente</th><th>DNI</th><th>Tipo</th><th>SIHCE</th><th>Estado</th><th>Asistencia</th><th>Acciones</th></tr></thead><tbody>'
             ct = ''
             for c in citas:
-                if c['turno'] != ct:
-                    ct = c['turno']
+                # La hora administrativa pertenece visualmente a la mañana
+                turno_grupo = 'MAÑANA' if c['turno'] == 'ADMINISTRATIVA' else c['turno']
+                if turno_grupo != ct:
+                    ct = turno_grupo
                     icon = '☀️' if ct == 'MAÑANA' else ('🌙' if ct == 'TARDE' else '📋')
                     citas_html += f'<tr class="turno-divider"><td colspan="9"><span class="turno-label">{icon} {ct}</span></td></tr>'
                 if c['turno'] == 'ADMINISTRATIVA':
@@ -2642,11 +2644,11 @@ def exportar_excel():
     rows = conn.execute("""SELECT c.fecha, c.turno, c.area, p.nombre as profesional,
         c.hora_inicio, c.hora_fin, c.paciente, c.dni, c.edad, c.celular, c.observaciones, c.estado,
         c.tipo_paciente, c.actividad_app, c.asistencia, c.sihce, c.sihce_prof_id, p.color_bg, p.color_font,
-        u.nombre as registrado_por
+        u.nombre as registrado_por, c.creado_en
         FROM citas c JOIN profesionales p ON p.id=c.profesional_id
         LEFT JOIN usuarios u ON u.id=c.creado_por
         WHERE strftime('%Y',c.fecha)=? AND strftime('%m',c.fecha)=?
-        ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'TARDE' THEN 2 WHEN 'ADMINISTRATIVA' THEN 3 END, CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'PSIQUIATRÍA - LOCACIÓN' THEN 2 WHEN 'MEDICINA' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA DE LENGUAJE' THEN 5 WHEN 'TERAPIA OCUPACIONAL' THEN 6 WHEN 'SIHCE' THEN 7 ELSE 8 END, p.orden, c.hora_inicio""",
+        ORDER BY c.fecha, CASE c.turno WHEN 'MAÑANA' THEN 1 WHEN 'ADMINISTRATIVA' THEN 2 WHEN 'TARDE' THEN 3 END, CASE p.especialidad WHEN 'PSIQUIATRÍA' THEN 1 WHEN 'PSIQUIATRÍA - LOCACIÓN' THEN 2 WHEN 'MEDICINA' THEN 3 WHEN 'PSICOLOGÍA' THEN 4 WHEN 'TERAPIA DE LENGUAJE' THEN 5 WHEN 'TERAPIA OCUPACIONAL' THEN 6 WHEN 'SIHCE' THEN 7 ELSE 8 END, p.orden, c.hora_inicio""",
         (str(year), f"{month:02d}")).fetchall()
     conn.close()
 
@@ -2658,14 +2660,14 @@ def exportar_excel():
     fmt_sep = wb.add_format({'bold': True, 'bg_color': '#f1f5f9', 'font_size': 11, 'border': 1, 'align': 'left', 'valign': 'vcenter'})
 
     # Title
-    ws.merge_range(0, 0, 0, 16, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
+    ws.merge_range(0, 0, 0, 17, f'AGENDA DE CITAS - {MESES_ES[month].upper()} {year}', fmt_title)
 
-    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'ASISTENCIA', 'SIHCE', 'REGISTRADO POR']
+    headers = ['FECHA', 'DÍA', 'TURNO', 'ÁREA', 'PROFESIONAL', 'HORA', 'PACIENTE', 'DNI', 'EDAD', 'CELULAR', 'OBSERVACIONES', 'ESTADO', 'TIPO', 'APP', 'ASISTENCIA', 'SIHCE', 'REGISTRADO POR', 'FECHA REGISTRO']
     for i, h in enumerate(headers): ws.write(2, i, h, fmt_h)
     ws.set_column(0, 0, 12); ws.set_column(1, 1, 10); ws.set_column(2, 2, 12); ws.set_column(3, 3, 14)
     ws.set_column(4, 4, 35); ws.set_column(5, 5, 15); ws.set_column(6, 6, 35); ws.set_column(7, 7, 10)
     ws.set_column(8, 8, 6); ws.set_column(9, 9, 12); ws.set_column(10, 10, 25); ws.set_column(11, 12, 14)
-    ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8); ws.set_column(16, 16, 25)
+    ws.set_column(13, 13, 30); ws.set_column(14, 14, 14); ws.set_column(15, 15, 8); ws.set_column(16, 16, 25); ws.set_column(17, 17, 18)
 
     fmt_cache = {}
     r = 3
@@ -2683,9 +2685,9 @@ def exportar_excel():
             if curr_turno in ('MAÑANA','TARDE') and (curr_date != prev_date or curr_turno != prev_turno):
                 turno_icon = 'MAÑANA ☀️' if curr_turno == 'MAÑANA' else 'TARDE 🌙'
                 if curr_date != prev_date:
-                    ws.merge_range(r, 0, r, 16, f"{sep_text} — {turno_icon}", fmt_sep)
+                    ws.merge_range(r, 0, r, 17, f"{sep_text} — {turno_icon}", fmt_sep)
                 else:
-                    ws.merge_range(r, 0, r, 16, f"        {turno_icon}", fmt_sep)
+                    ws.merge_range(r, 0, r, 17, f"        {turno_icon}", fmt_sep)
                 r += 1
             prev_date = curr_date; prev_turno = curr_turno
 
@@ -2714,6 +2716,14 @@ def exportar_excel():
         ws.write(r, 14, row.get('asistencia', ''), fc)
         ws.write(r, 15, 'SIHCE' if row['sihce'] else '', fc)
         ws.write(r, 16, row.get('registrado_por', '') or '', fl)
+        # Fecha de registro (convertir UTC a hora Perú)
+        fecha_reg = ''
+        if row.get('creado_en'):
+            try:
+                dt_reg = datetime.strptime(str(row['creado_en'])[:19], '%Y-%m-%d %H:%M:%S') - timedelta(hours=5)
+                fecha_reg = dt_reg.strftime('%d/%m/%Y %H:%M')
+            except: fecha_reg = ''
+        ws.write(r, 17, fecha_reg, fl)
         r += 1
 
     wb.close(); output.seek(0)
